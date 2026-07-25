@@ -4,6 +4,7 @@ from typing import List, Dict
 from openai import OpenAI
 
 from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+from memory import ConversationMemory
 
 SYSTEM_PROMPT = """你是一个对小说有深度理解的对话者。你读过这本书很多遍，不仅记得情节，更能读出文字背后的东西。
 
@@ -30,16 +31,17 @@ def build_context(retrieved_chunks: List[Dict]) -> str:
     return "\n\n---\n\n".join(context_parts)
 
 
-def ask(question: str, retrieved_chunks: List[Dict], history: List[Dict] = None) -> str:
+def ask(question: str, retrieved_chunks: List[Dict], memory: ConversationMemory) -> str:
     """调用 LLM 生成回答"""
     context = build_context(retrieved_chunks)
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    # 加入对话历史（如果有）
-    if history:
-        messages.extend(history[-6:])  # 最近3轮对话
+    # 注入记忆（锚点 + 摘要 + 最近对话）
+    memory_messages = memory.get_context_messages()
+    messages.extend(memory_messages)
 
+    # 当前问题（带检索片段）
     user_message = f"""以下是从小说中检索到的相关片段：
 
 {context}

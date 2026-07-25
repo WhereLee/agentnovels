@@ -13,6 +13,7 @@ from config import INDEX_DIR
 from loader import build_all_chunks, list_novels
 from vectorstore import HybridRetriever
 from agent import ask
+from memory import ConversationMemory
 
 
 def cmd_build(novel_name: str):
@@ -48,9 +49,10 @@ def cmd_chat(novel_name: str):
     retriever = HybridRetriever(novel_name)
     retriever.load_index()
 
-    print("\n输入问题开始聊天，输入 quit 或 q 退出。\n")
+    # 初始化记忆（自动恢复上次会话）
+    memory = ConversationMemory(novel_name)
 
-    history = []  # 对话历史
+    print("\n输入问题开始聊天，输入 quit 或 q 退出，输入 reset 重置会话。\n")
 
     while True:
         try:
@@ -64,6 +66,10 @@ def cmd_chat(novel_name: str):
         if question.lower() in ("quit", "q", "exit"):
             print("再见！")
             break
+        if question.lower() == "reset":
+            memory.reset()
+            print("会话已重置。\n")
+            continue
 
         # 检索
         print("  [检索中...]")
@@ -72,7 +78,7 @@ def cmd_chat(novel_name: str):
         # 生成回答
         print("  [生成中...]")
         try:
-            answer = ask(question, chunks, history)
+            answer = ask(question, chunks, memory)
         except Exception as e:
             print(f"  LLM 调用失败：{e}")
             continue
@@ -84,11 +90,8 @@ def cmd_chat(novel_name: str):
         sources = list(dict.fromkeys(c["chapter_title"] for c in chunks[:5]))
         print(f"\n  └─ 来源：{' / '.join(sources)}\n")
 
-        # 记录历史（保留最近 5 轮，防止上下文溢出）
-        history.append({"role": "user", "content": question})
-        history.append({"role": "assistant", "content": answer})
-        if len(history) > 10:
-            history = history[-10:]
+        # 记录到记忆
+        memory.add_turn(question, answer)
 
 
 def auto_chat():
