@@ -75,20 +75,17 @@ def cmd_chat(novel_name: str):
         print("  [检索中...]")
         chunks = retriever.search(question)
 
-        # 生成回答
-        print("  [生成中...]")
+        # 流式生成回答
+        print()
         try:
             answer = ask(question, chunks, memory)
         except Exception as e:
             print(f"  LLM 调用失败：{e}")
             continue
 
-        # 输出回答
-        print(f"\n{answer}")
-
         # 来源章节提示
         sources = list(dict.fromkeys(c["chapter_title"] for c in chunks[:5]))
-        print(f"\n  └─ 来源：{' / '.join(sources)}\n")
+        print(f"  └─ 来源：{' / '.join(sources)}\n")
 
         # 记录到记忆
         memory.add_turn(question, answer)

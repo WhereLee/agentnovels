@@ -32,7 +32,7 @@ def build_context(retrieved_chunks: List[Dict]) -> str:
 
 
 def ask(question: str, retrieved_chunks: List[Dict], memory: ConversationMemory) -> str:
-    """调用 LLM 生成回答"""
+    """调用 LLM 生成回答（流式输出）"""
     context = build_context(retrieved_chunks)
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -56,10 +56,21 @@ def ask(question: str, retrieved_chunks: List[Dict], memory: ConversationMemory)
 
     client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
 
-    response = client.chat.completions.create(
+    # 流式调用
+    stream = client.chat.completions.create(
         model=LLM_MODEL,
         messages=messages,
         temperature=0.85,
+        stream=True,
     )
 
-    return response.choices[0].message.content
+    # 逐字输出并累积完整回答
+    full_answer = []
+    for chunk in stream:
+        if chunk.choices and chunk.choices[0].delta.content:
+            token = chunk.choices[0].delta.content
+            print(token, end="", flush=True)
+            full_answer.append(token)
+
+    print()  # 换行
+    return "".join(full_answer)
