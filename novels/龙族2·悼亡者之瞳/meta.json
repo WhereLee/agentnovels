@@ -1,0 +1,130 @@
+{
+  "name": "龙族2·悼亡者之瞳",
+  "encoding": "gb18030",
+  "encoding_confidence": 0.5,
+  "total_chars": 426656,
+  "upload_time": "2026-07-26 04:57:48",
+  "chapter_detected": true,
+  "chapter_pattern": "standard_chinese",
+  "chapter_count": 22,
+  "chunk_count": 946,
+  "chunk_strategy": "fixed",
+  "chunk_params": {
+    "size": 500,
+    "overlap": 100
+  },
+  "chapters": [
+    {
+      "index": 0,
+      "title": "前言/引子",
+      "chars": 21424
+    },
+    {
+      "index": 1,
+      "title": "第一幕 生日蛋糕就是青春的墓碑",
+      "chars": 17038
+    },
+    {
+      "index": 2,
+      "title": "第二幕 同学少年都不贱",
+      "chars": 21431
+    },
+    {
+      "index": 3,
+      "title": "第三幕 悬赏",
+      "chars": 18915
+    },
+    {
+      "index": 4,
+      "title": "第四幕 炎魔刀舞",
+      "chars": 29681
+    },
+    {
+      "index": 5,
+      "title": "第五幕 蒲公英",
+      "chars": 26822
+    },
+    {
+      "index": 6,
+      "title": "第六幕 防火防盗防师兄",
+      "chars": 12463
+    },
+    {
+      "index": 7,
+      "title": "第七幕 群龙的盛宴",
+      "chars": 22478
+    },
+    {
+      "index": 8,
+      "title": "第八幕 康河上的叹息",
+      "chars": 18625
+    },
+    {
+      "index": 9,
+      "title": "第九幕 中庭坠落",
+      "chars": 13713
+    },
+    {
+      "index": 10,
+      "title": "第十幕 守夜人",
+      "chars": 21812
+    },
+    {
+      "index": 11,
+      "title": "第十一幕 婚约",
+      "chars": 17069
+    },
+    {
+      "index": 12,
+      "title": "第十二幕 龙骨十字",
+      "chars": 22750
+    },
+    {
+      "index": 13,
+      "title": "第十三幕 血统契约",
+      "chars": 17686
+    },
+    {
+      "index": 14,
+      "title": "第十四幕 罪与罚",
+      "chars": 17723
+    },
+    {
+      "index": 15,
+      "title": "第十五幕 幕后的人",
+      "chars": 16712
+    },
+    {
+      "index": 16,
+      "title": "第十六幕 It’s a Beautiful Day",
+      "chars": 14139
+    },
+    {
+      "index": 17,
+      "title": "第十七幕 悲剧舞台",
+      "chars": 15233
+    },
+    {
+      "index": 18,
+      "title": "第十八幕 迷宫",
+      "chars": 24096
+    },
+    {
+      "index": 19,
+      "title": "第十九幕 耶梦加得",
+      "chars": 27431
+    },
+    {
+      "index": 20,
+      "title": "第二十幕 凡王之血必以剑终",
+      "chars": 23698
+    },
+    {
+      "index": 21,
+      "title": "尾声 每个人的心里都有个死小孩",
+      "chars": 5671
+    }
+  ],
+  "status": "ready",
+  "message": "检测到 22 个章节（模式: standard_chinese）"
+}
