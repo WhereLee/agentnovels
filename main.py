@@ -1,6 +1,13 @@
 """小说问答 AI Agent - CLI 入口"""
 import argparse
 import sys
+import os
+
+# 修复 Windows 终端中文输出
+if sys.platform == "win32":
+    os.system("")  # 启用 ANSI 转义
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from config import INDEX_DIR
 from loader import build_all_chunks, list_novels
@@ -70,11 +77,58 @@ def cmd_chat(novel_name: str):
             print(f"  LLM 调用失败：{e}")
             continue
 
-        print(f"\nAI：{answer}\n")
+        # 输出回答
+        print(f"\n{answer}")
 
-        # 记录历史
+        # 来源章节提示
+        sources = list(dict.fromkeys(c["chapter_title"] for c in chunks[:5]))
+        print(f"\n  └─ 来源：{' / '.join(sources)}\n")
+
+        # 记录历史（保留最近 5 轮，防止上下文溢出）
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": answer})
+        if len(history) > 10:
+            history = history[-10:]
+
+
+def auto_chat():
+    """无参数时自动检测小说并进入聊天"""
+    novels = list_novels()
+    if not novels:
+        print("错误：novels/raw/ 下未找到小说。")
+        input("\n按回车键退出...")
+        return
+
+    # 检查哪些小说已有索引
+    indexed = []
+    for n in novels:
+        if (INDEX_DIR / n / "embeddings.npy").exists():
+            indexed.append(n)
+
+    if not indexed:
+        print("检测到小说，但尚未建立索引：")
+        for n in novels:
+            print(f"  - {n}")
+        print("\n请先运行: python main.py --build \"小说名\"")
+        input("\n按回车键退出...")
+        return
+
+    # 如果只有一本，直接进入
+    if len(indexed) == 1:
+        novel = indexed[0]
+    else:
+        print("检测到多本已索引小说：")
+        for i, n in enumerate(indexed, 1):
+            print(f"  {i}. {n}")
+        choice = input("输入编号选择：").strip()
+        try:
+            novel = indexed[int(choice) - 1]
+        except (ValueError, IndexError):
+            print("无效选择。")
+            input("\n按回车键退出...")
+            return
+
+    cmd_chat(novel)
 
 
 def main():
@@ -100,7 +154,7 @@ def main():
     elif args.chat:
         cmd_chat(args.chat)
     else:
-        parser.print_help()
+        auto_chat()
 
 
 if __name__ == "__main__":
