@@ -9,7 +9,7 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-from config import INDEX_DIR
+from config import INDEX_DIR, logger
 from loader import build_all_chunks, list_novels
 from vectorstore import HybridRetriever
 from agent import ask
@@ -41,14 +41,24 @@ def cmd_chat(novel_name: str):
     index_path = INDEX_DIR / novel_name
     if not index_path.exists():
         print(f"错误：未找到索引，请先运行 --build")
-        print(f"  python main.py --build \"{novel_name}\"")
+        print(f"  python src/main.py --build \"{novel_name}\"")
         sys.exit(1)
 
     print(f"=== 小说问答：{novel_name} ===")
     print("正在加载索引...")
 
-    retriever = HybridRetriever(novel_name)
-    retriever.load_index()
+    try:
+        retriever = HybridRetriever(novel_name)
+        retriever.load_index()
+    except (FileNotFoundError, ValueError) as e:
+        print(f"\n索引加载失败：{e}")
+        input("\n按回车键退出...")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"索引加载异常：{e}", exc_info=True)
+        print(f"\n索引加载异常：{e}")
+        input("\n按回车键退出...")
+        sys.exit(1)
 
     # 初始化记忆（自动恢复上次会话）
     memory = ConversationMemory(novel_name)
@@ -83,8 +93,13 @@ def cmd_chat(novel_name: str):
         print()
         try:
             answer = ask(question, chunks, memory)
+        except RuntimeError as e:
+            print(f"\n  生成失败：{e}")
+            logger.error(f"LLM 调用失败：{e}")
+            continue
         except Exception as e:
-            print(f"  LLM 调用失败：{e}")
+            print(f"\n  未知错误：{e}")
+            logger.error(f"未知错误：{e}", exc_info=True)
             continue
 
         # 来源章节提示

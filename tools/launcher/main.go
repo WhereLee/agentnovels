@@ -17,12 +17,12 @@ func main() {
 		return
 	}
 	exeDir := filepath.Dir(exePath)
-	scriptPath := filepath.Join(exeDir, "main.py")
+	scriptPath := filepath.Join(exeDir, "src", "main.py")
 
 	// 检查 main.py 是否存在
 	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
-		fmt.Println("错误：未找到 main.py")
-		fmt.Printf("请确保本程序与 main.py 在同一目录下。\n")
+		fmt.Println("错误：未找到 src/main.py")
+		fmt.Printf("请确保本程序与 src/ 目录在同一目录下。\n")
 		fmt.Printf("当前目录：%s\n", exeDir)
 		waitExit()
 		return

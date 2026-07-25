@@ -3,7 +3,7 @@ from typing import List, Dict
 
 from openai import OpenAI
 
-from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_TIMEOUT, logger
 from memory import ConversationMemory
 
 SYSTEM_PROMPT = """你是一个对小说有深度理解的对话者。你读过这本书很多遍，不仅记得情节，更能读出文字背后的东西。
@@ -54,23 +54,37 @@ def ask(question: str, retrieved_chunks: List[Dict], memory: ConversationMemory)
 
     messages.append({"role": "user", "content": user_message})
 
-    client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL)
+    client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL, timeout=LLM_TIMEOUT)
 
     # 流式调用
-    stream = client.chat.completions.create(
-        model=LLM_MODEL,
-        messages=messages,
-        temperature=0.85,
-        stream=True,
-    )
+    try:
+        stream = client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=messages,
+            temperature=0.85,
+            stream=True,
+        )
+    except Exception as e:
+        logger.error(f"LLM API 调用失败：{e}")
+        raise RuntimeError(
+            f"LLM 服务不可用：{e}\n"
+            f"请检查网络连接和 API 密钥配置（config.py）。"
+        )
 
     # 逐字输出并累积完整回答
     full_answer = []
-    for chunk in stream:
-        if chunk.choices and chunk.choices[0].delta.content:
-            token = chunk.choices[0].delta.content
-            print(token, end="", flush=True)
-            full_answer.append(token)
+    try:
+        for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                token = chunk.choices[0].delta.content
+                print(token, end="", flush=True)
+                full_answer.append(token)
+    except Exception as e:
+        logger.error(f"流式读取中断：{e}")
+        if not full_answer:
+            raise RuntimeError(f"LLM 响应中断：{e}")
 
     print()  # 换行
-    return "".join(full_answer)
+    answer = "".join(full_answer)
+    logger.debug(f"LLM 生成完成，回答长度：{len(answer)} 字")
+    return answer

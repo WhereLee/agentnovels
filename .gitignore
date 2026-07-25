@@ -27,3 +27,8 @@ tools/*.exe
 *.tmp
 novels/structure.txt
 test_output.txt
+test_memory_output.txt
+test_100_output.txt
+
+# 日志
+logs/
