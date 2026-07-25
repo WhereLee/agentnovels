@@ -176,6 +176,77 @@ async def delete_novel(novel_name: str):
 
 
 # ============================================================
+# 数据浏览 API
+# ============================================================
+
+@app.get("/viewer", response_class=HTMLResponse)
+async def viewer_page():
+    """数据浏览页面"""
+    html_file = TEMPLATES_DIR / "viewer.html"
+    if not html_file.exists():
+        return HTMLResponse("<h1>未找到 viewer.html</h1>", status_code=500)
+    return HTMLResponse(html_file.read_text(encoding='utf-8'))
+
+
+@app.get("/api/novels/{novel_name}/chapters")
+async def get_chapters(novel_name: str):
+    """获取章节列表（不含正文）"""
+    from database import get_db_path, load_chapters
+    db_path = get_db_path(str(NOVELS_DIR / novel_name))
+    if not Path(db_path).exists():
+        raise HTTPException(status_code=404, detail="数据库不存在")
+    chapters = load_chapters(db_path)
+    # 不返回 content，只返回摘要
+    return {"chapters": [
+        {"index": ch["chapter_index"], "title": ch["title"], "chars": ch["chars"]}
+        for ch in chapters
+    ]}
+
+
+@app.get("/api/novels/{novel_name}/chapters/{chapter_index}")
+async def get_chapter_detail(novel_name: str, chapter_index: int):
+    """获取单章正文"""
+    from database import get_db_path, load_chapters
+    db_path = get_db_path(str(NOVELS_DIR / novel_name))
+    if not Path(db_path).exists():
+        raise HTTPException(status_code=404, detail="数据库不存在")
+    chapters = load_chapters(db_path)
+    for ch in chapters:
+        if ch["chapter_index"] == chapter_index:
+            return {"chapter": ch}
+    raise HTTPException(status_code=404, detail="章节不存在")
+
+
+@app.get("/api/novels/{novel_name}/chunks")
+async def get_chunks(novel_name: str, strategy: str = "fixed", chapter: int = -1, page: int = 1, size: int = 20):
+    """获取切块（分页）"""
+    from database import get_db_path, load_chunks, load_chunks_by_chapter, get_chunk_count
+    db_path = get_db_path(str(NOVELS_DIR / novel_name))
+    if not Path(db_path).exists():
+        raise HTTPException(status_code=404, detail="数据库不存在")
+
+    if chapter >= 0:
+        chunks = load_chunks_by_chapter(db_path, chapter, strategy)
+        total = len(chunks)
+    else:
+        chunks = load_chunks(db_path, strategy)
+        total = len(chunks)
+
+    # 分页
+    start = (page - 1) * size
+    end = start + size
+    page_chunks = chunks[start:end]
+
+    return {
+        "chunks": page_chunks,
+        "total": total,
+        "page": page,
+        "size": size,
+        "pages": (total + size - 1) // size,
+    }
+
+
+# ============================================================
 # 工具函数
 # ============================================================
 

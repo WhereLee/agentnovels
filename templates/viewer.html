@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Viewer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0f0f0f; --surface: #1a1a1a; --surface2: #222;
+            --border: #2a2a2a; --text: #e8e8e8; --dim: #888;
+            --accent: #4a9eff; --accent2: #7c4dff;
+        }
+        body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+        
+        /* Top Bar */
+        .topbar { display: flex; align-items: center; gap: 16px; padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
+        .topbar h1 { font-size: 16px; font-weight: 600; }
+        .topbar a { color: var(--dim); text-decoration: none; font-size: 13px; }
+        .topbar a:hover { color: var(--accent); }
+        .novel-select { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 6px 12px; border-radius: 6px; font-size: 13px; outline: none; }
+        .novel-select:focus { border-color: var(--accent); }
+
+        /* Layout */
+        .main { display: flex; flex: 1; overflow: hidden; }
+        
+        /* Sidebar */
+        .sidebar { width: 260px; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: var(--surface); }
+        .sidebar-header { padding: 12px 16px; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .tab-group { display: flex; gap: 4px; }
+        .tab-btn { font-size: 11px; padding: 3px 10px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--dim); cursor: pointer; }
+        .tab-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .sidebar-list { flex: 1; overflow-y: auto; padding: 8px; }
+        .sidebar-item { padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; margin-bottom: 2px; display: flex; justify-content: space-between; align-items: center; transition: background 0.1s; }
+        .sidebar-item:hover { background: var(--surface2); }
+        .sidebar-item.active { background: rgba(74,158,255,0.1); color: var(--accent); }
+        .sidebar-item .idx { font-size: 11px; color: var(--dim); min-width: 24px; }
+        .sidebar-item .chars { font-size: 11px; color: var(--dim); }
+
+        /* Content */
+        .content { flex: 1; overflow-y: auto; padding: 24px 32px; }
+        .content-header { margin-bottom: 20px; }
+        .content-header h2 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+        .content-header .meta { font-size: 12px; color: var(--dim); }
+        
+        /* Chapter View */
+        .chapter-text { font-size: 15px; line-height: 2; color: #ccc; white-space: pre-wrap; max-width: 700px; }
+        
+        /* Chunk Cards */
+        .chunk-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; margin-bottom: 12px; transition: border-color 0.15s; }
+        .chunk-card:hover { border-color: #444; }
+        .chunk-header { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 11px; color: var(--dim); }
+        .chunk-header .id { color: var(--accent2); font-weight: 600; }
+        .chunk-body { font-size: 13px; line-height: 1.8; color: #bbb; white-space: pre-wrap; }
+        
+        /* Pagination */
+        .pagination { display: flex; gap: 8px; align-items: center; margin-top: 20px; justify-content: center; }
+        .page-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-size: 13px; }
+        .page-btn:hover { border-color: var(--accent); }
+        .page-btn:disabled { opacity: 0.3; cursor: default; }
+        .page-info { font-size: 12px; color: var(--dim); }
+
+        /* Empty */
+        .empty { text-align: center; padding: 60px; color: var(--dim); font-size: 14px; }
+        
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>Data Viewer</h1>
+        <select class="novel-select" id="novel-select"><option>加载中...</option></select>
+        <a href="/">← 返回管理</a>
+    </div>
+    <div class="main">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <span id="sidebar-title">章节</span>
+                <div class="tab-group">
+                    <button class="tab-btn active" data-tab="chapters" onclick="switchTab('chapters')">章节</button>
+                    <button class="tab-btn" data-tab="chunks" onclick="switchTab('chunks')">切块</button>
+                </div>
+            </div>
+            <div class="sidebar-list" id="sidebar-list"></div>
+        </div>
+        <div class="content" id="content">
+            <div class="empty">选择一本小说开始浏览</div>
+        </div>
+    </div>
+
+    <script>
+        let currentNovel = '';
+        let currentTab = 'chapters';
+        let chaptersData = [];
+        let chunkPage = 1;
+        let chunkChapter = -1;
+
+        // === 初始化 ===
+        async function init() {
+            const resp = await fetch('/api/novels');
+            const data = await resp.json();
+            const select = document.getElementById('novel-select');
+            select.innerHTML = data.novels.map(n => `<option value="${n.name}">${n.name}</option>`).join('');
+            if (data.novels.length > 0) {
+                currentNovel = data.novels[0].name;
+                loadChapters();
+            }
+            select.addEventListener('change', () => {
+                currentNovel = select.value;
+                chunkChapter = -1;
+                chunkPage = 1;
+                if (currentTab === 'chapters') loadChapters();
+                else loadChunks();
+            });
+        }
+
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+            document.getElementById('sidebar-title').textContent = tab === 'chapters' ? '章节' : '切块';
+            if (tab === 'chapters') loadChapters();
+            else loadChunks();
+        }
+
+        // === 章节 ===
+        async function loadChapters() {
+            const resp = await fetch(`/api/novels/${encodeURIComponent(currentNovel)}/chapters`);
+            const data = await resp.json();
+            chaptersData = data.chapters;
+            const list = document.getElementById('sidebar-list');
+            list.innerHTML = chaptersData.map(ch => `
+                <div class="sidebar-item" onclick="viewChapter(${ch.index})" id="ch-${ch.index}">
+                    <span><span class="idx">${ch.index}</span>${ch.title.substring(0, 16)}</span>
+                    <span class="chars">${(ch.chars/1000).toFixed(1)}k</span>
+                </div>
+            `).join('');
+            document.getElementById('content').innerHTML = '<div class="empty">点击左侧章节查看内容</div>';
+        }
+
+        async function viewChapter(idx) {
+            document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+            document.getElementById(`ch-${idx}`)?.classList.add('active');
+            
+            const resp = await fetch(`/api/novels/${encodeURIComponent(currentNovel)}/chapters/${idx}`);
+            const data = await resp.json();
+            const ch = data.chapter;
+            document.getElementById('content').innerHTML = `
+                <div class="content-header">
+                    <h2>${ch.title}</h2>
+                    <div class="meta">第 ${ch.chapter_index} 章 · ${ch.chars.toLocaleString()} 字</div>
+                </div>
+                <div class="chapter-text">${ch.content.substring(0, 5000)}${ch.content.length > 5000 ? '\n\n... (截断显示，共 ' + ch.chars.toLocaleString() + ' 字)' : ''}</div>
+            `;
+        }
+
+        // === 切块 ===
+        async function loadChunks() {
+            const resp = await fetch(`/api/novels/${encodeURIComponent(currentNovel)}/chunks?strategy=fixed&chapter=${chunkChapter}&page=${chunkPage}&size=20`);
+            const data = await resp.json();
+            
+            // 侧边栏显示章节过滤
+            const list = document.getElementById('sidebar-list');
+            let filterHtml = `<div class="sidebar-item ${chunkChapter === -1 ? 'active' : ''}" onclick="filterChunk(-1)"><span>全部切块</span><span class="chars">${data.total}</span></div>`;
+            if (chaptersData.length === 0) {
+                const chResp = await fetch(`/api/novels/${encodeURIComponent(currentNovel)}/chapters`);
+                const chData = await chResp.json();
+                chaptersData = chData.chapters;
+            }
+            filterHtml += chaptersData.map(ch => `
+                <div class="sidebar-item ${chunkChapter === ch.index ? 'active' : ''}" onclick="filterChunk(${ch.index})" style="font-size:12px">
+                    <span><span class="idx">${ch.index}</span>${ch.title.substring(0, 12)}</span>
+                </div>
+            `).join('');
+            list.innerHTML = filterHtml;
+
+            // 内容区
+            const content = document.getElementById('content');
+            if (data.chunks.length === 0) {
+                content.innerHTML = '<div class="empty">无切块数据</div>';
+                return;
+            }
+            content.innerHTML = `
+                <div class="content-header">
+                    <h2>切块浏览</h2>
+                    <div class="meta">策略: fixed · 共 ${data.total} 块 · 第 ${data.page}/${data.pages} 页</div>
+                </div>
+                ${data.chunks.map(c => `
+                    <div class="chunk-card">
+                        <div class="chunk-header">
+                            <span class="id">#${c.chunk_id}</span>
+                            <span>${c.chapter_title.substring(0, 15)} · ${c.chars}字</span>
+                        </div>
+                        <div class="chunk-body">${c.content.substring(0, 300)}${c.content.length > 300 ? '...' : ''}</div>
+                    </div>
+                `).join('')}
+                <div class="pagination">
+                    <button class="page-btn" onclick="goPage(${data.page - 1})" ${data.page <= 1 ? 'disabled' : ''}>上一页</button>
+                    <span class="page-info">${data.page} / ${data.pages}</span>
+                    <button class="page-btn" onclick="goPage(${data.page + 1})" ${data.page >= data.pages ? 'disabled' : ''}>下一页</button>
+                </div>
+            `;
+        }
+
+        function filterChunk(chapterIdx) {
+            chunkChapter = chapterIdx;
+            chunkPage = 1;
+            loadChunks();
+        }
+        function goPage(p) {
+            chunkPage = p;
+            loadChunks();
+        }
+
+        init();
+    </script>
+</body>
+</html>
