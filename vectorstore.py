@@ -10,8 +10,8 @@ from sentence_transformers import SentenceTransformer, CrossEncoder
 
 from config import MODEL_PATH, INDEX_DIR, VECTOR_TOP_K, BM25_TOP_K, TOP_K
 
-# Reranker 模型路径（首次运行时自动下载）
-RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
+# Reranker 模型路径（本地）
+RERANKER_MODEL = str(MODEL_PATH.parent / "bge-reranker-v2-m3")
 
 
 class HybridRetriever:
@@ -33,11 +33,9 @@ class HybridRetriever:
             self.model = SentenceTransformer(str(MODEL_PATH))
 
     def _load_reranker(self):
-        """懒加载 reranker 模型（自动从 hf-mirror 下载）"""
+        """懒加载 reranker 模型（本地路径）"""
         if self.reranker is None:
-            import os
-            os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-            print("正在加载 reranker 模型（首次需下载）...")
+            print("正在加载 reranker 模型...")
             self.reranker = CrossEncoder(RERANKER_MODEL)
 
     def _load_custom_dict(self):
