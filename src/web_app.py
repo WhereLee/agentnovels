@@ -16,6 +16,7 @@ from encoding_detector import read_file_auto_encoding, detect_encoding
 from chapter_detector import detect_chapters
 from chunker import chunk_chapters, DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP
 from database import get_db_path, init_db, save_chapters, save_chunks as db_save_chunks, get_chunk_count
+from text_cleaner import clean_text
 
 # === 路径配置 ===
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -98,6 +99,9 @@ async def upload_novel(file: UploadFile = File(...)):
 
         # === 3. 读取全文 ===
         text, encoding, confidence = read_file_auto_encoding(str(original_path))
+
+        # === 3.5 清洗文本 ===
+        text, clean_stats = clean_text(text)
         total_chars = len(text)
 
         if total_chars < 100:
@@ -143,6 +147,7 @@ async def upload_novel(file: UploadFile = File(...)):
             ],
             "status": "ready",
             "message": detection_result.message,
+            "text_cleaning": clean_stats,
         }
 
         meta_file = novel_dir / "meta.json"

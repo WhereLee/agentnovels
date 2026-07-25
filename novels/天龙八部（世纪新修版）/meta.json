@@ -2,12 +2,12 @@
   "name": "天龙八部（世纪新修版）",
   "encoding": "gb18030",
   "encoding_confidence": 1.0,
-  "total_chars": 1294763,
+  "total_chars": 1187676,
   "upload_time": "2026-07-26 05:01:21",
   "chapter_detected": true,
   "chapter_pattern": "standard_chinese",
-  "chapter_count": 52,
-  "chunk_count": 2920,
+  "chapter_count": 49,
+  "chunk_count": 2682,
   "chunk_strategy": "fixed",
   "chunk_params": {
     "size": 500,
@@ -276,5 +276,7 @@
     }
   ],
   "status": "ready",
-  "message": "检测到 52 个章节（模式: standard_chinese）"
+  "message": "检测到 52 个章节（模式: standard_chinese）",
+  "cleaned": true,
+  "junk_removed": 89
 }

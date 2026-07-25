@@ -191,7 +191,7 @@
                             <span class="id">#${c.chunk_id}</span>
                             <span>${c.chapter_title.substring(0, 15)} · ${c.chars}字</span>
                         </div>
-                        <div class="chunk-body">${c.content.substring(0, 300)}${c.content.length > 300 ? '...' : ''}</div>
+                        <div class="chunk-body">${c.content}</div>
                     </div>
                 `).join('')}
                 <div class="pagination">
