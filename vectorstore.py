@@ -1,14 +1,17 @@
-"""向量存储与混合检索模块：BGE embedding + numpy 余弦相似度 + BM25"""
+"""向量存储与混合检索模块：BGE embedding + numpy 余弦相似度 + BM25 + Rerank"""
 import json
 import jieba
 import numpy as np
-from typing import List, Dict
+from typing import List, Dict, Optional
 from pathlib import Path
 
 from rank_bm25 import BM25Okapi
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 
 from config import MODEL_PATH, INDEX_DIR, VECTOR_TOP_K, BM25_TOP_K, TOP_K
+
+# Reranker 模型路径（首次运行时自动下载）
+RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 
 
 class HybridRetriever:
@@ -21,11 +24,42 @@ class HybridRetriever:
         self.embeddings: np.ndarray = None
         self.bm25: BM25Okapi = None
         self.model: SentenceTransformer = None
+        self.reranker: Optional[CrossEncoder] = None
+        self._custom_dict_loaded = False
 
     def _load_model(self):
         """懒加载 embedding 模型"""
         if self.model is None:
             self.model = SentenceTransformer(str(MODEL_PATH))
+
+    def _load_reranker(self):
+        """懒加载 reranker 模型（自动从 hf-mirror 下载）"""
+        if self.reranker is None:
+            import os
+            os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+            print("正在加载 reranker 模型（首次需下载）...")
+            self.reranker = CrossEncoder(RERANKER_MODEL)
+
+    def _load_custom_dict(self):
+        """从章节标题提取角色名加入 jieba 自定义词典"""
+        if self._custom_dict_loaded:
+            return
+        # 从 chunks 的 chapter_title 中提取中文名称（2-4字）
+        names = set()
+        for chunk in self.chunks:
+            title = chunk.get("chapter_title", "")
+            # 提取中文词组（可能是角色名）
+            import re
+            for match in re.findall(r'[\u4e00-\u9fff]{2,4}', title):
+                names.add(match)
+        # 常见小说角色名（硬编码补充）
+        names.update(["楚子航", "路明非", "诺诺", "恺撒", "苏茜", "夏弥",
+                      "柳淼淼", "陈雯雯", "芬格尔", "昂热", "奥丁",
+                      "迈巴赫", "卡塞尔", "狮心会", "仕兰中学"])
+        for name in names:
+            jieba.add_word(name, freq=10000)
+        self._custom_dict_loaded = True
+        print(f"BM25 自定义词典已加载：{len(names)} 个词条")
 
     def _tokenize(self, text: str) -> List[str]:
         """中文分词（用于 BM25）"""
@@ -64,6 +98,9 @@ class HybridRetriever:
         with open(chunks_file, "r", encoding="utf-8") as f:
             self.chunks = json.load(f)
 
+        # 加载自定义词典（在 BM25 构建前）
+        self._load_custom_dict()
+
         # 加载向量
         self.embeddings = np.load(self.index_dir / "embeddings.npy")
 
@@ -73,7 +110,7 @@ class HybridRetriever:
         print(f"索引加载完成，共 {len(self.chunks)} 条文本块。")
 
     def search(self, query: str, top_k: int = TOP_K) -> List[Dict]:
-        """混合检索：向量 + BM25 + RRF 融合"""
+        """混合检索：向量 + BM25 + RRF 融合 + Rerank"""
         # 向量检索（余弦相似度）
         query_embedding = self.model.encode([query])[0]  # shape: (768,)
         # 归一化
@@ -99,18 +136,40 @@ class HybridRetriever:
             doc_id = self.chunks[idx]["id"]
             rrf_scores[doc_id] = rrf_scores.get(doc_id, 0) + 1.0 / (k + rank + 1)
 
-        # 按 RRF 分数排序
-        sorted_ids = sorted(rrf_scores.keys(), key=lambda x: -rrf_scores[x])[:top_k]
+        # 按 RRF 分数排序，取更多候选用于 rerank
+        rerank_k = top_k * 2
+        sorted_ids = sorted(rrf_scores.keys(), key=lambda x: -rrf_scores[x])[:rerank_k]
 
-        # 组装结果
-        results = []
+        # Rerank（用 cross-encoder 精排）
         chunk_map = {c["id"]: c for c in self.chunks}
-        for doc_id in sorted_ids:
-            chunk = chunk_map[doc_id]
-            results.append({
-                "text": chunk["text"],
-                "chapter_title": chunk["chapter_title"],
-                "score": rrf_scores[doc_id],
-            })
+        candidates = [chunk_map[doc_id] for doc_id in sorted_ids]
 
-        return results
+        try:
+            self._load_reranker()
+            pairs = [(query, c["text"]) for c in candidates]
+            rerank_scores = self.reranker.predict(pairs)
+
+            # 按 rerank 分数排序
+            scored = list(zip(candidates, rerank_scores))
+            scored.sort(key=lambda x: -x[1])
+
+            results = []
+            for chunk, score in scored[:top_k]:
+                results.append({
+                    "text": chunk["text"],
+                    "chapter_title": chunk["chapter_title"],
+                    "score": float(score),
+                })
+            return results
+
+        except Exception:
+            # reranker 失败时回退到 RRF 排序
+            results = []
+            for doc_id in sorted_ids[:top_k]:
+                chunk = chunk_map[doc_id]
+                results.append({
+                    "text": chunk["text"],
+                    "chapter_title": chunk["chapter_title"],
+                    "score": rrf_scores[doc_id],
+                })
+            return results

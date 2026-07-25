@@ -14,6 +14,7 @@ from loader import build_all_chunks, list_novels
 from vectorstore import HybridRetriever
 from agent import ask
 from memory import ConversationMemory
+from query import enhance_query
 
 
 def cmd_build(novel_name: str):
@@ -71,9 +72,12 @@ def cmd_chat(novel_name: str):
             print("会话已重置。\n")
             continue
 
+        # 查询增强（指代消解）
+        enhanced_query = enhance_query(question, memory)
+
         # 检索
         print("  [检索中...]")
-        chunks = retriever.search(question)
+        chunks = retriever.search(enhanced_query)
 
         # 流式生成回答
         print()
