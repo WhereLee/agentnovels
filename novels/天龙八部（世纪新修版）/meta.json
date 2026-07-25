@@ -1,0 +1,280 @@
+{
+  "name": "天龙八部（世纪新修版）",
+  "encoding": "gb18030",
+  "encoding_confidence": 1.0,
+  "total_chars": 1294763,
+  "upload_time": "2026-07-26 05:01:21",
+  "chapter_detected": true,
+  "chapter_pattern": "standard_chinese",
+  "chapter_count": 52,
+  "chunk_count": 2920,
+  "chunk_strategy": "fixed",
+  "chunk_params": {
+    "size": 500,
+    "overlap": 100
+  },
+  "chapters": [
+    {
+      "index": 0,
+      "title": "前言/引子",
+      "chars": 2783
+    },
+    {
+      "index": 1,
+      "title": "第一章 青衫磊落险峰行",
+      "chars": 24789
+    },
+    {
+      "index": 2,
+      "title": "第二章 玉壁月华明",
+      "chars": 26959
+    },
+    {
+      "index": 3,
+      "title": "第三章 马疾香幽",
+      "chars": 22690
+    },
+    {
+      "index": 4,
+      "title": "第四章 崖高人远",
+      "chars": 29147
+    },
+    {
+      "index": 5,
+      "title": "第五章 微步縠纹生",
+      "chars": 26555
+    },
+    {
+      "index": 6,
+      "title": "第六章 谁家子弟谁家院",
+      "chars": 22846
+    },
+    {
+      "index": 7,
+      "title": "第七章 无计悔多情",
+      "chars": 22932
+    },
+    {
+      "index": 8,
+      "title": "第八章 虎啸龙吟",
+      "chars": 24328
+    },
+    {
+      "index": 9,
+      "title": "第九章 换巢鸾凤",
+      "chars": 32396
+    },
+    {
+      "index": 10,
+      "title": "第十章 剑气碧烟横",
+      "chars": 25959
+    },
+    {
+      "index": 11,
+      "title": "第十一章 向来痴",
+      "chars": 26298
+    },
+    {
+      "index": 12,
+      "title": "第十二章 从此醉",
+      "chars": 28258
+    },
+    {
+      "index": 13,
+      "title": "第十三章 水榭听香 指点群豪戏",
+      "chars": 29798
+    },
+    {
+      "index": 14,
+      "title": "第十四章 剧饮千杯男儿事",
+      "chars": 24527
+    },
+    {
+      "index": 15,
+      "title": "第十五章 杏子林中 商略平生义",
+      "chars": 25469
+    },
+    {
+      "index": 16,
+      "title": "第十六章 昔时因",
+      "chars": 26317
+    },
+    {
+      "index": 17,
+      "title": "第十七章 今日意",
+      "chars": 24001
+    },
+    {
+      "index": 18,
+      "title": "第十八章 胡汉恩仇 须倾英雄泪",
+      "chars": 37475
+    },
+    {
+      "index": 19,
+      "title": "第十九章 虽万千人吾往矣",
+      "chars": 26237
+    },
+    {
+      "index": 20,
+      "title": "第二十章 悄立雁门 绝壁无余字",
+      "chars": 14870
+    },
+    {
+      "index": 21,
+      "title": "第二十一章 千里茫茫若梦",
+      "chars": 30153
+    },
+    {
+      "index": 22,
+      "title": "第二十二章 双眸粲粲如星",
+      "chars": 33043
+    },
+    {
+      "index": 23,
+      "title": "第二十三章 塞上牛羊空许约",
+      "chars": 23185
+    },
+    {
+      "index": 24,
+      "title": "第二十四章 烛畔鬓云有旧盟",
+      "chars": 30168
+    },
+    {
+      "index": 25,
+      "title": "第二十五章 莽苍踏雪行",
+      "chars": 32430
+    },
+    {
+      "index": 26,
+      "title": "第二十六章 赤手屠熊搏虎",
+      "chars": 13222
+    },
+    {
+      "index": 27,
+      "title": "第二十七章 金戈荡寇鏖兵",
+      "chars": 25298
+    },
+    {
+      "index": 28,
+      "title": "第二十八章 草木残生颅铸铁",
+      "chars": 23373
+    },
+    {
+      "index": 29,
+      "title": "第二十九章 虫豸凝寒掌作冰",
+      "chars": 28657
+    },
+    {
+      "index": 30,
+      "title": "第三十章 挥洒缚豪英",
+      "chars": 24625
+    },
+    {
+      "index": 31,
+      "title": "第三十一章 输赢成败 又争由人算",
+      "chars": 18670
+    },
+    {
+      "index": 32,
+      "title": "第三十二章 且自逍遥没谁管",
+      "chars": 24318
+    },
+    {
+      "index": 33,
+      "title": "第三十三章 奈天昏地暗 斗转星移",
+      "chars": 19743
+    },
+    {
+      "index": 34,
+      "title": "第三十四章 风骤紧 缥缈峰头云乱",
+      "chars": 22848
+    },
+    {
+      "index": 35,
+      "title": "第三十五章 红颜弹指老 刹那芳华",
+      "chars": 27634
+    },
+    {
+      "index": 36,
+      "title": "第三十六章 梦里真真语真幻",
+      "chars": 23709
+    },
+    {
+      "index": 37,
+      "title": "第三十七章 同一笑 到头万事俱空",
+      "chars": 22274
+    },
+    {
+      "index": 38,
+      "title": "第三十八章 糊涂醉 情长计短",
+      "chars": 19613
+    },
+    {
+      "index": 39,
+      "title": "第三十九章 解不了 名缰系嗔贪",
+      "chars": 22912
+    },
+    {
+      "index": 40,
+      "title": "第四十章 却试问 几时把痴心断",
+      "chars": 19192
+    },
+    {
+      "index": 41,
+      "title": "第四十一章 燕云十八飞骑 奔腾如虎风烟举",
+      "chars": 28030
+    },
+    {
+      "index": 42,
+      "title": "第四十二章 老魔小丑 岂堪一击 胜之不武",
+      "chars": 30899
+    },
+    {
+      "index": 43,
+      "title": "第四十三章 王霸雄图 血海深恨 尽归尘土",
+      "chars": 24634
+    },
+    {
+      "index": 44,
+      "title": "第四十四章 念枉求美眷 良缘安在",
+      "chars": 26172
+    },
+    {
+      "index": 45,
+      "title": "第四十五章 枯井底 污泥处",
+      "chars": 28469
+    },
+    {
+      "index": 46,
+      "title": "第四十六章 酒罢问君三语",
+      "chars": 27917
+    },
+    {
+      "index": 47,
+      "title": "第四十七章 为谁开 茶花满路",
+      "chars": 20485
+    },
+    {
+      "index": 48,
+      "title": "第四十八章 王孙落魄 怎生消得 杨枝玉露",
+      "chars": 32211
+    },
+    {
+      "index": 49,
+      "title": "第四十九章 敝屣荣华 浮云生死 此身何惧",
+      "chars": 24647
+    },
+    {
+      "index": 50,
+      "title": "第五十章 教单于折箭 六军辟易 奋英雄怒",
+      "chars": 35812
+    },
+    {
+      "index": 51,
+      "title": "后记",
+      "chars": 5633
+    }
+  ],
+  "status": "ready",
+  "message": "检测到 52 个章节（模式: standard_chinese）"
+}

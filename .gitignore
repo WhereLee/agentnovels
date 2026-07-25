@@ -14,6 +14,7 @@ novels/raw/
 novels/*/original.txt
 novels/*/chapters/
 novels/*/chunks/
+novels/*/data.db
 
 # 向量索引（可重建）
 index/
@@ -34,6 +35,8 @@ test_memory_output.txt
 test_100_output.txt
 test_pipeline.py
 test_api.py
+test_db.py
+migrate_to_db.py
 
 # 日志
 logs/

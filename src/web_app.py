@@ -14,7 +14,8 @@ from fastapi.staticfiles import StaticFiles
 
 from encoding_detector import read_file_auto_encoding, detect_encoding
 from chapter_detector import detect_chapters
-from chunker import chunk_chapters, save_chunks, DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP
+from chunker import chunk_chapters, DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP
+from database import get_db_path, init_db, save_chapters, save_chunks as db_save_chunks, get_chunk_count
 
 # === 路径配置 ===
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -107,31 +108,14 @@ async def upload_novel(file: UploadFile = File(...)):
         # === 4. 检测章节 ===
         detection_result = detect_chapters(text)
 
-        # === 5. 保存章节文件 ===
-        chapters_dir = novel_dir / "chapters"
-        chapters_dir.mkdir(exist_ok=True)
-
-        for chapter in detection_result.chapters:
-            idx = chapter["index"]
-            title = chapter["title"]
-            # 文件名安全处理
-            safe_title = _sanitize_filename(title)[:30]
-            chapter_file = chapters_dir / f"{idx:03d}_{safe_title}.json"
-            with open(chapter_file, 'w', encoding='utf-8') as f:
-                json.dump({
-                    "title": title,
-                    "content": chapter["content"],
-                }, f, ensure_ascii=False, indent=2)
+        # === 5. 写入 SQLite ===
+        db_path = get_db_path(str(novel_dir))
+        init_db(db_path)
+        save_chapters(db_path, detection_result.chapters)
 
         # === 6. 切块 ===
         chunks = chunk_chapters(detection_result.chapters)
-        chunks_dir = novel_dir / "chunks" / "fixed"
-        save_chunks(chunks, str(chunks_dir), params={
-            "strategy": "fixed",
-            "chunk_size": DEFAULT_CHUNK_SIZE,
-            "overlap": DEFAULT_OVERLAP,
-            "max_chunk_size": 800,
-        })
+        db_save_chunks(db_path, chunks, strategy="fixed")
 
         # === 7. 生成 meta.json ===
         meta = {
