@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from encoding_detector import read_file_auto_encoding, detect_encoding
 from chapter_detector import detect_chapters
-from chunker import chunk_chapters, DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP
+from chunker import chunk_chapters, chunk_chapters_sentence, DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP
 from database import get_db_path, init_db, save_chapters, save_chunks as db_save_chunks, get_chunk_count
 from text_cleaner import clean_text
 
@@ -117,9 +117,12 @@ async def upload_novel(file: UploadFile = File(...)):
         init_db(db_path)
         save_chapters(db_path, detection_result.chapters)
 
-        # === 6. 切块 ===
-        chunks = chunk_chapters(detection_result.chapters)
-        db_save_chunks(db_path, chunks, strategy="fixed")
+        # === 6. 切块（两种策略） ===
+        chunks_fixed = chunk_chapters(detection_result.chapters)
+        db_save_chunks(db_path, chunks_fixed, strategy="fixed")
+
+        chunks_sentence = chunk_chapters_sentence(detection_result.chapters)
+        db_save_chunks(db_path, chunks_sentence, strategy="sentence")
 
         # === 7. 生成 meta.json ===
         meta = {
@@ -131,8 +134,9 @@ async def upload_novel(file: UploadFile = File(...)):
             "chapter_detected": detection_result.detected,
             "chapter_pattern": detection_result.pattern_name,
             "chapter_count": len(detection_result.chapters),
-            "chunk_count": len(chunks),
-            "chunk_strategy": "fixed",
+            "chunk_count": len(chunks_fixed),
+            "chunk_count_sentence": len(chunks_sentence),
+            "chunk_strategy": "fixed + sentence",
             "chunk_params": {
                 "size": DEFAULT_CHUNK_SIZE,
                 "overlap": DEFAULT_OVERLAP,

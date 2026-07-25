@@ -231,3 +231,77 @@ def _find_sentence_start(text: str) -> int:
             return i + 1
     # 找不到就返回 0（全部作为重叠）
     return 0
+
+
+# ============================================================
+# 策略二：句子边界切块（无重叠，句子不可切断）
+# ============================================================
+
+SENTENCE_SPLIT = re.compile(r'(?<=[。！？…\u201d」』】])')
+
+
+def chunk_text_sentence(
+    text: str,
+    target_size: int = DEFAULT_CHUNK_SIZE,
+) -> List[str]:
+    """
+    句子边界切块：
+    - 先断句，再累积到目标字数成块
+    - 句子绝不切断
+    - 无重叠
+    """
+    if not text or not text.strip():
+        return []
+
+    # 断句
+    sentences = SENTENCE_SPLIT.split(text)
+    sentences = [s for s in sentences if s.strip()]
+
+    if not sentences:
+        return []
+
+    chunks = []
+    current = ""
+
+    for sent in sentences:
+        # 当前块 + 新句子 是否超过目标
+        if current and len(current) + len(sent) > target_size:
+            chunks.append(current)
+            current = sent
+        else:
+            current += sent
+
+    if current.strip():
+        chunks.append(current)
+
+    return chunks
+
+
+def chunk_chapters_sentence(
+    chapters: List[Dict],
+    target_size: int = DEFAULT_CHUNK_SIZE,
+) -> List[Dict]:
+    """
+    对章节列表执行句子边界切块（不跨章）。
+    """
+    all_chunks = []
+    chunk_id = 0
+
+    for chapter in chapters:
+        content = chapter.get("content", "")
+        chapter_idx = chapter.get("index", 0)
+        chapter_title = chapter.get("title", "")
+
+        text_chunks = chunk_text_sentence(content, target_size)
+
+        for text in text_chunks:
+            all_chunks.append({
+                "chunk_id": chunk_id,
+                "chapter_index": chapter_idx,
+                "chapter_title": chapter_title,
+                "content": text,
+                "chars": len(text),
+            })
+            chunk_id += 1
+
+    return all_chunks
