@@ -10,8 +10,8 @@ import threading
 from pathlib import Path
 from typing import List, Dict
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from encoding_detector import read_file_auto_encoding, detect_encoding
@@ -324,6 +324,130 @@ async def get_vectorize_progress(novel_name: str, strategy: str = "fixed"):
     """查询向量化进度"""
     vectorizer = _get_vectorizer(novel_name, strategy)
     return vectorizer.get_progress()
+
+
+# ============================================================
+# 对话 API（SSE 流式）
+# ============================================================
+
+# 检索器缓存（全局）
+_retrievers: Dict[str, object] = {}  # key: "novel_name:strategy"
+_retriever_lock = threading.Lock()
+
+# 对话历史（内存，按 novel:strategy 隔离）
+_chat_histories: Dict[str, List[Dict]] = {}  # key: "novel_name:strategy"
+
+
+def _get_retriever(novel_name: str, strategy: str):
+    """获取或创建 HybridRetriever 实例"""
+    key = f"{novel_name}:{strategy}"
+    with _retriever_lock:
+        if key not in _retrievers:
+            from retriever import HybridRetriever
+            _retrievers[key] = HybridRetriever(novel_name, strategy)
+        return _retrievers[key]
+
+
+@app.get("/chat", response_class=HTMLResponse)
+async def chat_page():
+    """对话页面"""
+    html_file = TEMPLATES_DIR / "chat.html"
+    if not html_file.exists():
+        return HTMLResponse("<h1>未找到 chat.html</h1>", status_code=500)
+    return HTMLResponse(html_file.read_text(encoding='utf-8'))
+
+
+@app.post("/api/novels/{novel_name}/chat")
+async def chat(novel_name: str, request: Request):
+    """
+    发送消息，SSE 流式返回。
+    
+    POST body: {"message": "...", "strategy": "fixed"|"sentence"}
+    """
+    body = await request.json()
+    message = body.get("message", "").strip()
+    strategy = body.get("strategy", "fixed")
+
+    if not message:
+        raise HTTPException(status_code=400, detail="消息不能为空")
+    if strategy not in ("fixed", "sentence"):
+        raise HTTPException(status_code=400, detail="strategy 必须是 fixed 或 sentence")
+
+    # 获取检索器
+    try:
+        retriever = _get_retriever(novel_name, strategy)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # 获取对话历史
+    history_key = f"{novel_name}:{strategy}"
+    if history_key not in _chat_histories:
+        _chat_histories[history_key] = []
+    history = _chat_histories[history_key]
+
+    # 检索
+    try:
+        contexts = await asyncio.to_thread(retriever.search, message)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"检索失败: {e}")
+
+    if not contexts:
+        raise HTTPException(status_code=404, detail="未检索到相关内容，请确认向量化已完成")
+
+    # 流式生成
+    from agent import generate_answer
+
+    def sse_stream():
+        full_response = []
+        try:
+            for token in generate_answer(message, contexts, history):
+                if token.startswith("\n__SOURCES__"):
+                    # 来源信息
+                    sources_json = token[len("\n__SOURCES__"):]
+                    yield f"data: {json.dumps({'type': 'sources', 'chunks': json.loads(sources_json)}, ensure_ascii=False)}\n\n"
+                else:
+                    full_response.append(token)
+                    yield f"data: {json.dumps({'type': 'token', 'content': token}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
+
+        # 保存到对话历史
+        answer = "".join(full_response)
+        history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": answer})
+        # 保留最近 20 轮
+        if len(history) > 40:
+            _chat_histories[history_key] = history[-40:]
+
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(
+        sse_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/api/novels/{novel_name}/chat/history")
+async def get_chat_history(novel_name: str, strategy: str = "fixed"):
+    """获取对话历史"""
+    history_key = f"{novel_name}:{strategy}"
+    history = _chat_histories.get(history_key, [])
+    return {"history": history}
+
+
+@app.post("/api/novels/{novel_name}/chat/reset")
+async def reset_chat(novel_name: str, request: Request):
+    """重置对话"""
+    body = await request.json()
+    strategy = body.get("strategy", "fixed")
+    history_key = f"{novel_name}:{strategy}"
+    _chat_histories[history_key] = []
+    return {"success": True, "message": "对话已重置"}
 
 
 # ============================================================

@@ -15,6 +15,8 @@ novels/*/original.txt
 novels/*/chapters/
 novels/*/chunks/
 novels/*/data.db
+novels/*/chroma/
+novels/*/custom_dict.txt
 
 # 向量索引（可重建）
 index/
@@ -40,6 +42,8 @@ test_timing.py
 test_vec.py
 test_chroma.py
 test_chroma_persist/
+test_benchmark.py
+test_chat.py
 migrate_to_db.py
 
 # 日志

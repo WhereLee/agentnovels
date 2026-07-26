@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Novel RAG - 对话</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --surface2: #1c2128;
+            --border: #30363d;
+            --text: #e6edf3;
+            --text-dim: #8b949e;
+            --accent: #58a6ff;
+            --accent-dim: #1f6feb;
+            --user-bubble: #1f6feb;
+            --ai-bubble: #21262d;
+            --source-bg: #0d1117;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 12px 24px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        .header a { color: var(--accent); text-decoration: none; font-size: 13px; }
+        .header a:hover { text-decoration: underline; }
+        .header .title { font-size: 16px; font-weight: 600; }
+        .header .novel-name { color: var(--accent); font-size: 14px; }
+
+        /* Strategy Toggle */
+        .strategy-toggle {
+            display: flex;
+            gap: 0;
+            margin-left: auto;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .strategy-btn {
+            padding: 6px 14px;
+            font-size: 12px;
+            background: transparent;
+            color: var(--text-dim);
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .strategy-btn.active {
+            background: var(--accent-dim);
+            color: #fff;
+        }
+        .strategy-btn:hover:not(.active) { background: var(--surface2); }
+
+        /* Chat Area */
+        .chat-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .chat-area::-webkit-scrollbar { width: 6px; }
+        .chat-area::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+        /* Messages */
+        .msg { display: flex; flex-direction: column; max-width: 80%; }
+        .msg.user { align-self: flex-end; align-items: flex-end; }
+        .msg.ai { align-self: flex-start; align-items: flex-start; }
+        .msg .bubble {
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.7;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .msg.user .bubble {
+            background: var(--user-bubble);
+            color: #fff;
+            border-bottom-right-radius: 4px;
+        }
+        .msg.ai .bubble {
+            background: var(--ai-bubble);
+            border: 1px solid var(--border);
+            border-bottom-left-radius: 4px;
+        }
+
+        /* Sources */
+        .sources-box {
+            margin-top: 8px;
+            width: 100%;
+        }
+        .sources-toggle {
+            font-size: 12px;
+            color: var(--accent);
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 4px 0;
+        }
+        .sources-toggle:hover { text-decoration: underline; }
+        .sources-list {
+            display: none;
+            margin-top: 6px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .sources-list.open { display: block; }
+        .source-item {
+            padding: 10px 12px;
+            background: var(--source-bg);
+            border-bottom: 1px solid var(--border);
+            font-size: 12px;
+        }
+        .source-item:last-child { border-bottom: none; }
+        .source-item .meta { color: var(--accent); margin-bottom: 4px; }
+        .source-item .preview { color: var(--text-dim); line-height: 1.5; }
+        .source-item .score { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
+
+        /* Typing indicator */
+        .typing-dot { display: inline-block; width: 6px; height: 6px; background: var(--text-dim); border-radius: 50%; margin: 0 2px; animation: blink 1.4s infinite; }
+        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes blink { 0%,80%,100% { opacity: 0.3; } 40% { opacity: 1; } }
+
+        /* Input Area */
+        .input-area {
+            display: flex;
+            gap: 12px;
+            padding: 16px 24px;
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        .input-area textarea {
+            flex: 1;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: var(--text);
+            font-size: 14px;
+            resize: none;
+            height: 48px;
+            max-height: 120px;
+            line-height: 1.5;
+            font-family: inherit;
+        }
+        .input-area textarea:focus { border-color: var(--accent); outline: none; }
+        .input-area button {
+            padding: 0 20px;
+            background: var(--accent-dim);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .input-area button:hover { background: var(--accent); }
+        .input-area button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Empty state */
+        .empty-state {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-dim);
+            font-size: 14px;
+        }
+
+        /* Reset button */
+        .reset-btn {
+            font-size: 12px;
+            color: var(--text-dim);
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 4px 10px;
+            cursor: pointer;
+        }
+        .reset-btn:hover { border-color: var(--accent); color: var(--accent); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <a href="/">← 管理</a>
+        <span class="title">对话</span>
+        <span class="novel-name" id="novelName"></span>
+        <button class="reset-btn" onclick="resetChat()">重置对话</button>
+        <div class="strategy-toggle">
+            <button class="strategy-btn active" data-strategy="fixed" onclick="switchStrategy('fixed')">fixed</button>
+            <button class="strategy-btn" data-strategy="sentence" onclick="switchStrategy('sentence')">sentence</button>
+        </div>
+    </div>
+
+    <div class="chat-area" id="chatArea">
+        <div class="empty-state" id="emptyState">输入问题，开始对话</div>
+    </div>
+
+    <div class="input-area">
+        <textarea id="msgInput" placeholder="输入问题... (Enter 发送, Shift+Enter 换行)" rows="1"></textarea>
+        <button id="sendBtn" onclick="sendMessage()">发送</button>
+    </div>
+
+    <script>
+        // === 状态 ===
+        const params = new URLSearchParams(window.location.search);
+        const novelName = params.get('novel') || '';
+        let strategy = 'fixed';
+        let isStreaming = false;
+
+        document.getElementById('novelName').textContent = novelName ? `《${novelName}》` : '';
+
+        if (!novelName) {
+            document.getElementById('emptyState').textContent = '错误：未指定小说。请从管理页面进入。';
+        }
+
+        // === 策略切换 ===
+        function switchStrategy(s) {
+            strategy = s;
+            document.querySelectorAll('.strategy-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.strategy === s);
+            });
+            // 切换策略时清空界面
+            clearChat();
+            loadHistory();
+        }
+
+        // === 发送消息 ===
+        async function sendMessage() {
+            const input = document.getElementById('msgInput');
+            const message = input.value.trim();
+            if (!message || isStreaming || !novelName) return;
+
+            // 隐藏空状态
+            document.getElementById('emptyState').style.display = 'none';
+
+            // 显示用户消息
+            appendMessage('user', message);
+            input.value = '';
+            input.style.height = '48px';
+
+            // 创建 AI 消息占位
+            const aiMsg = appendMessage('ai', '');
+            const bubble = aiMsg.querySelector('.bubble');
+            bubble.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
+
+            isStreaming = true;
+            document.getElementById('sendBtn').disabled = true;
+
+            try {
+                const resp = await fetch(`/api/novels/${encodeURIComponent(novelName)}/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message, strategy }),
+                });
+
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    bubble.textContent = `[错误] ${err.detail || '请求失败'}`;
+                    isStreaming = false;
+                    document.getElementById('sendBtn').disabled = false;
+                    return;
+                }
+
+                // SSE 流式读取
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let fullText = '';
+                let sources = null;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();  // 保留未完成的行
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        const data = JSON.parse(line.slice(6));
+
+                        if (data.type === 'token') {
+                            fullText += data.content;
+                            bubble.textContent = fullText;
+                            scrollToBottom();
+                        } else if (data.type === 'sources') {
+                            sources = data.chunks;
+                        } else if (data.type === 'error') {
+                            fullText += `\n[错误] ${data.content}`;
+                            bubble.textContent = fullText;
+                        } else if (data.type === 'done') {
+                            // 完成
+                        }
+                    }
+                }
+
+                // 显示来源
+                if (sources && sources.length > 0) {
+                    renderSources(aiMsg, sources);
+                }
+
+            } catch (e) {
+                bubble.textContent = `[错误] 网络异常: ${e.message}`;
+            }
+
+            isStreaming = false;
+            document.getElementById('sendBtn').disabled = false;
+            scrollToBottom();
+        }
+
+        // === 渲染来源 ===
+        function renderSources(msgEl, sources) {
+            const box = document.createElement('div');
+            box.className = 'sources-box';
+
+            const toggle = document.createElement('button');
+            toggle.className = 'sources-toggle';
+            toggle.textContent = `▶ 引用来源 (${sources.length})`;
+            toggle.onclick = () => {
+                const list = box.querySelector('.sources-list');
+                list.classList.toggle('open');
+                toggle.textContent = list.classList.contains('open')
+                    ? `▼ 引用来源 (${sources.length})`
+                    : `▶ 引用来源 (${sources.length})`;
+            };
+
+            const list = document.createElement('div');
+            list.className = 'sources-list';
+
+            sources.forEach((s, i) => {
+                const item = document.createElement('div');
+                item.className = 'source-item';
+                item.innerHTML = `
+                    <div class="meta">#${i+1} ${s.chapter_title} (chunk_${s.chunk_id})</div>
+                    <div class="preview">${escapeHtml(s.content_preview)}</div>
+                    <div class="score">score: ${s.score}</div>
+                `;
+                list.appendChild(item);
+            });
+
+            box.appendChild(toggle);
+            box.appendChild(list);
+            msgEl.appendChild(box);
+        }
+
+        // === 工具函数 ===
+        function appendMessage(role, text) {
+            const chatArea = document.getElementById('chatArea');
+            const msg = document.createElement('div');
+            msg.className = `msg ${role}`;
+            const bubble = document.createElement('div');
+            bubble.className = 'bubble';
+            bubble.textContent = text;
+            msg.appendChild(bubble);
+            chatArea.appendChild(msg);
+            scrollToBottom();
+            return msg;
+        }
+
+        function scrollToBottom() {
+            const area = document.getElementById('chatArea');
+            area.scrollTop = area.scrollHeight;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function clearChat() {
+            const area = document.getElementById('chatArea');
+            area.innerHTML = '<div class="empty-state" id="emptyState">输入问题，开始对话</div>';
+        }
+
+        // === 重置对话 ===
+        async function resetChat() {
+            if (!novelName) return;
+            await fetch(`/api/novels/${encodeURIComponent(novelName)}/chat/reset`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ strategy }),
+            });
+            clearChat();
+        }
+
+        // === 加载历史 ===
+        async function loadHistory() {
+            if (!novelName) return;
+            try {
+                const resp = await fetch(`/api/novels/${encodeURIComponent(novelName)}/chat/history?strategy=${strategy}`);
+                const data = await resp.json();
+                if (data.history && data.history.length > 0) {
+                    document.getElementById('emptyState').style.display = 'none';
+                    data.history.forEach(msg => {
+                        appendMessage(msg.role === 'user' ? 'user' : 'ai', msg.content);
+                    });
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        // === 键盘事件 ===
+        const msgInput = document.getElementById('msgInput');
+        msgInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+        // 自动调整高度
+        msgInput.addEventListener('input', () => {
+            msgInput.style.height = '48px';
+            msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + 'px';
+        });
+
+        // 初始加载历史
+        loadHistory();
+    </script>
+</body>
+</html>
