@@ -36,6 +36,10 @@ test_100_output.txt
 test_pipeline.py
 test_api.py
 test_db.py
+test_timing.py
+test_vec.py
+test_chroma.py
+test_chroma_persist/
 migrate_to_db.py
 
 # 日志
