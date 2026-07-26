@@ -272,6 +272,24 @@
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+        /* Vectorize Section */
+        .vec-section { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+        .vec-title { font-size: 12px; color: var(--dim); margin-bottom: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+        .vec-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+        .vec-row label { font-size: 12px; color: var(--text-dim); min-width: 60px; }
+        .vec-select, .vec-input { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        .vec-select:focus, .vec-input:focus { border-color: var(--accent); outline: none; }
+        .vec-input { width: 60px; }
+        .vec-btn { padding: 5px 14px; border-radius: 6px; border: none; background: var(--accent); color: #fff; font-size: 12px; cursor: pointer; font-weight: 500; }
+        .vec-btn:hover { opacity: 0.85; }
+        .vec-btn:disabled { opacity: 0.4; cursor: default; }
+        .vec-progress { margin-top: 8px; font-size: 12px; color: var(--text-dim); }
+        .vec-bar { height: 4px; background: var(--border); border-radius: 2px; margin-top: 4px; overflow: hidden; }
+        .vec-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.5s; }
+        .vec-strategy-tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+        .vec-tab { font-size: 11px; padding: 3px 10px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--dim); cursor: pointer; }
+        .vec-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
     </style>
 </head>
 <body>
@@ -428,6 +446,36 @@
                         <button class="btn-small" onclick="deleteNovel('${novel.name}')">删除</button>
                     </div>
                     <div class="chapter-list">${chapterListHtml}</div>
+                    <div class="vec-section">
+                        <div class="vec-title">向量化</div>
+                        <div class="vec-strategy-tabs">
+                            <button class="vec-tab active" onclick="switchVecTab(this, '${novel.name}', 'fixed')">fixed</button>
+                            <button class="vec-tab" onclick="switchVecTab(this, '${novel.name}', 'sentence')">sentence</button>
+                        </div>
+                        <div class="vec-row">
+                            <label>推理模式</label>
+                            <select class="vec-select" id="vec-mode-${novel.name}">
+                                <option value="pytorch">PyTorch</option>
+                                <option value="onnx">ONNX</option>
+                                <option value="onnx_int8">ONNX+INT8</option>
+                            </select>
+                            <label>batch_size</label>
+                            <input class="vec-input" type="number" id="vec-bs-${novel.name}" value="48" min="8" max="256">
+                        </div>
+                        <div class="vec-row">
+                            <label>处理量</label>
+                            <select class="vec-select" id="vec-count-${novel.name}">
+                                <option value="50">前 50 块</option>
+                                <option value="200">前 200 块</option>
+                                <option value="-1">全部剩余</option>
+                                <option value="custom">自定义</option>
+                            </select>
+                            <input class="vec-input" type="number" id="vec-custom-${novel.name}" placeholder="N" style="display:none" min="1">
+                            <button class="vec-btn" id="vec-btn-${novel.name}" onclick="startVec('${novel.name}')">开始向量化</button>
+                        </div>
+                        <div class="vec-progress" id="vec-progress-${novel.name}"></div>
+                        <div class="vec-bar"><div class="vec-bar-fill" id="vec-bar-${novel.name}" style="width:0%"></div></div>
+                    </div>
                 </div>`;
             }).join('');
         }
@@ -461,6 +509,97 @@
             toast.textContent = msg;
             toast.className = `toast toast-${type} show`;
             setTimeout(() => toast.classList.remove('show'), 3500);
+        }
+
+        // === 向量化控制 ===
+        const vecStrategies = {};  // {novelName: 'fixed'|'sentence'}
+        const vecPollers = {};     // {novelName: intervalId}
+
+        function switchVecTab(btn, novelName, strategy) {
+            btn.parentElement.querySelectorAll('.vec-tab').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            vecStrategies[novelName] = strategy;
+            pollVecProgress(novelName);  // 切换后立即刷新进度
+        }
+
+        // count 选择器联动
+        document.addEventListener('change', (e) => {
+            if (e.target.id && e.target.id.startsWith('vec-count-')) {
+                const novelName = e.target.id.replace('vec-count-', '');
+                const customInput = document.getElementById(`vec-custom-${novelName}`);
+                customInput.style.display = e.target.value === 'custom' ? 'inline-block' : 'none';
+            }
+        });
+
+        async function startVec(novelName) {
+            const strategy = vecStrategies[novelName] || 'fixed';
+            const mode = document.getElementById(`vec-mode-${novelName}`).value;
+            const batchSize = parseInt(document.getElementById(`vec-bs-${novelName}`).value) || 48;
+            const countSel = document.getElementById(`vec-count-${novelName}`).value;
+            const count = countSel === 'custom'
+                ? parseInt(document.getElementById(`vec-custom-${novelName}`).value) || 50
+                : parseInt(countSel);
+
+            const btn = document.getElementById(`vec-btn-${novelName}`);
+            btn.disabled = true;
+            btn.textContent = '运行中...';
+
+            try {
+                const resp = await fetch(`/api/novels/${encodeURIComponent(novelName)}/vectorize`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ strategy, mode, batch_size: batchSize, count }),
+                });
+                const data = await resp.json();
+                if (!resp.ok) throw new Error(data.detail || '启动失败');
+                showToast(data.message, 'success');
+                // 开始轮询进度
+                startPolling(novelName);
+            } catch (err) {
+                showToast(err.message, 'error');
+                btn.disabled = false;
+                btn.textContent = '开始向量化';
+            }
+        }
+
+        function startPolling(novelName) {
+            if (vecPollers[novelName]) clearInterval(vecPollers[novelName]);
+            vecPollers[novelName] = setInterval(() => pollVecProgress(novelName), 2000);
+            pollVecProgress(novelName);
+        }
+
+        async function pollVecProgress(novelName) {
+            const strategy = vecStrategies[novelName] || 'fixed';
+            try {
+                const resp = await fetch(`/api/novels/${encodeURIComponent(novelName)}/vectorize/progress?strategy=${strategy}`);
+                const p = await resp.json();
+                const progEl = document.getElementById(`vec-progress-${novelName}`);
+                const barEl = document.getElementById(`vec-bar-${novelName}`);
+                const btn = document.getElementById(`vec-btn-${novelName}`);
+
+                const pct = p.total > 0 ? (p.embedded / p.total * 100).toFixed(1) : 0;
+                barEl.style.width = pct + '%';
+
+                if (p.status === 'running') {
+                    progEl.textContent = `${p.embedded}/${p.total} (${pct}%)  耗时:${p.elapsed}s  预计剩余:${p.eta}s`;
+                    btn.disabled = true;
+                    btn.textContent = '运行中...';
+                } else if (p.status === 'done') {
+                    progEl.textContent = `完成! ${p.embedded}/${p.total}  耗时:${p.elapsed}s`;
+                    btn.disabled = false;
+                    btn.textContent = '开始向量化';
+                    if (vecPollers[novelName]) { clearInterval(vecPollers[novelName]); vecPollers[novelName] = null; }
+                } else if (p.status === 'error') {
+                    progEl.textContent = `错误: ${p.error}`;
+                    btn.disabled = false;
+                    btn.textContent = '重新开始';
+                    if (vecPollers[novelName]) { clearInterval(vecPollers[novelName]); vecPollers[novelName] = null; }
+                } else {
+                    progEl.textContent = p.total > 0 ? `已入库: ${p.embedded}/${p.total}  剩余: ${p.remaining}` : '';
+                    btn.disabled = false;
+                    btn.textContent = '开始向量化';
+                }
+            } catch (err) { /* ignore */ }
         }
 
         // === 初始化 ===

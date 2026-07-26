@@ -5,6 +5,8 @@ FastAPI + 原生 HTML 前端
 import json
 import shutil
 import time
+import asyncio
+import threading
 from pathlib import Path
 from typing import List, Dict
 
@@ -117,11 +119,13 @@ async def upload_novel(file: UploadFile = File(...)):
         init_db(db_path)
         save_chapters(db_path, detection_result.chapters)
 
-        # === 6. 切块（两种策略） ===
-        chunks_fixed = chunk_chapters(detection_result.chapters)
+        # === 6. 切块（两种策略并行） ===
+        import asyncio
+        chunks_fixed, chunks_sentence = await asyncio.gather(
+            asyncio.to_thread(chunk_chapters, detection_result.chapters),
+            asyncio.to_thread(chunk_chapters_sentence, detection_result.chapters),
+        )
         db_save_chunks(db_path, chunks_fixed, strategy="fixed")
-
-        chunks_sentence = chunk_chapters_sentence(detection_result.chapters)
         db_save_chunks(db_path, chunks_sentence, strategy="sentence")
 
         # === 7. 生成 meta.json ===
@@ -253,6 +257,73 @@ async def get_chunks(novel_name: str, strategy: str = "fixed", chapter: int = -1
         "size": size,
         "pages": (total + size - 1) // size,
     }
+
+
+# ============================================================
+# 向量化 API
+# ============================================================
+
+# 向量化任务管理器（全局）
+_vectorizers: Dict[str, object] = {}  # key: "novel_name:strategy"
+_vectorize_lock = threading.Lock()
+
+
+def _get_vectorizer(novel_name: str, strategy: str):
+    """获取或创建 Vectorizer 实例"""
+    key = f"{novel_name}:{strategy}"
+    with _vectorize_lock:
+        if key not in _vectorizers:
+            from vectorizer import Vectorizer
+            _vectorizers[key] = Vectorizer(novel_name, strategy)
+        return _vectorizers[key]
+
+
+@app.post("/api/novels/{novel_name}/vectorize")
+async def start_vectorize(novel_name: str, request: dict):
+    """
+    启动向量化任务。
+    
+    参数:
+        strategy: "fixed" | "sentence"
+        mode: "pytorch" | "onnx" | "onnx_int8"
+        batch_size: int (default 48)
+        count: int (-1=全部剩余, 正整数=指定数量)
+    """
+    strategy = request.get("strategy", "fixed")
+    mode = request.get("mode", "pytorch")
+    batch_size = request.get("batch_size", 48)
+    count = request.get("count", -1)
+
+    if strategy not in ("fixed", "sentence"):
+        raise HTTPException(status_code=400, detail="strategy 必须是 fixed 或 sentence")
+    if mode not in ("pytorch", "onnx", "onnx_int8"):
+        raise HTTPException(status_code=400, detail="mode 必须是 pytorch/onnx/onnx_int8")
+
+    vectorizer = _get_vectorizer(novel_name, strategy)
+
+    # 检查是否已在运行
+    progress = vectorizer.get_progress()
+    if progress["status"] == "running":
+        raise HTTPException(status_code=409, detail="向量化任务正在运行中")
+
+    # 后台执行
+    def run_task():
+        try:
+            vectorizer.run(count=count, mode=mode, batch_size=batch_size)
+        except Exception as e:
+            pass  # 错误已记录在 vectorizer 内部
+
+    thread = threading.Thread(target=run_task, daemon=True)
+    thread.start()
+
+    return {"success": True, "message": f"向量化已启动 ({strategy}/{mode}/bs={batch_size}/count={count})"}
+
+
+@app.get("/api/novels/{novel_name}/vectorize/progress")
+async def get_vectorize_progress(novel_name: str, strategy: str = "fixed"):
+    """查询向量化进度"""
+    vectorizer = _get_vectorizer(novel_name, strategy)
+    return vectorizer.get_progress()
 
 
 # ============================================================

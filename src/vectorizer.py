@@ -1,0 +1,179 @@
+"""
+向量化服务：编排 chunks → embedder → ChromaDB
+
+功能：
+- 从 SQLite 读取 chunks
+- 调用 Embedder 计算向量
+- 批量写入 ChromaDB（500条/批）
+- 断点续传（collection.count()）
+- 进度报告（线程安全）
+"""
+import time
+import threading
+import chromadb
+import numpy as np
+from pathlib import Path
+from typing import Optional, Callable
+
+from config import NOVELS_RAW_DIR
+from database import get_db_path, load_chunks
+from embedder import Embedder
+
+
+class Vectorizer:
+    """
+    单本小说 + 单种策略的向量化管理器。
+    
+    ChromaDB 存储路径: novels/{小说名}/chroma/
+    Collection 名: strategy（"fixed" 或 "sentence"）
+    """
+
+    def __init__(self, novel_name: str, strategy: str = "fixed"):
+        self.novel_name = novel_name
+        self.strategy = strategy
+        self.novel_dir = NOVELS_RAW_DIR / novel_name
+
+        # ChromaDB 初始化
+        chroma_path = str(self.novel_dir / "chroma")
+        Path(chroma_path).mkdir(parents=True, exist_ok=True)
+        self.client = chromadb.PersistentClient(path=chroma_path)
+        self.collection = self.client.get_or_create_collection(
+            name=strategy,
+            metadata={"hnsw:space": "cosine"},
+        )
+
+        # 进度状态（线程安全）
+        self._lock = threading.Lock()
+        self._status = "idle"  # idle | running | done | error
+        self._embedded = 0
+        self._total = 0
+        self._current_batch_done = 0
+        self._start_time = 0.0
+        self._error_msg = ""
+
+    def get_progress(self) -> dict:
+        """获取当前进度（线程安全）"""
+        with self._lock:
+            embedded = self.collection.count()
+            # 获取总 chunk 数
+            db_path = get_db_path(str(self.novel_dir))
+            all_chunks = load_chunks(db_path, self.strategy)
+            total = len(all_chunks)
+            remaining = total - embedded
+
+            elapsed = time.perf_counter() - self._start_time if self._start_time > 0 else 0
+            # 预估剩余时间
+            if self._status == "running" and self._current_batch_done > 0:
+                rate = self._current_batch_done / max(elapsed, 0.1)
+                eta = remaining / max(rate, 0.01)
+            else:
+                eta = 0
+
+            return {
+                "status": self._status,
+                "embedded": embedded,
+                "total": total,
+                "remaining": remaining,
+                "elapsed": round(elapsed, 1),
+                "eta": round(eta, 1),
+                "error": self._error_msg,
+            }
+
+    def run(
+        self,
+        count: int = -1,
+        mode: str = "pytorch",
+        batch_size: int = 48,
+        progress_callback: Optional[Callable] = None,
+    ):
+        """
+        执行向量化。
+        
+        参数:
+            count: 处理多少块（-1 = 全部剩余）
+            mode: 推理模式 (pytorch/onnx/onnx_int8)
+            batch_size: 推理批次大小
+            progress_callback: 外部进度回调
+        """
+        with self._lock:
+            if self._status == "running":
+                raise RuntimeError("向量化任务正在运行中")
+            self._status = "running"
+            self._error_msg = ""
+            self._start_time = time.perf_counter()
+            self._current_batch_done = 0
+
+        try:
+            # 1. 获取断点
+            embedded = self.collection.count()
+
+            # 2. 从 SQLite 取全部 chunks
+            db_path = get_db_path(str(self.novel_dir))
+            all_chunks = load_chunks(db_path, self.strategy)
+            total = len(all_chunks)
+
+            # 3. 确定处理范围
+            remaining_chunks = all_chunks[embedded:]
+            if count > 0:
+                remaining_chunks = remaining_chunks[:count]
+
+            if not remaining_chunks:
+                with self._lock:
+                    self._status = "done"
+                return
+
+            with self._lock:
+                self._total = total
+                self._embedded = embedded
+
+            # 4. 加载 Embedder
+            embedder = Embedder(mode=mode, batch_size=batch_size)
+
+            # 5. 提取文本
+            texts = [c["content"] for c in remaining_chunks]
+
+            # 6. 向量化（带进度回调）
+            def internal_progress(done, total_batch, elapsed):
+                with self._lock:
+                    self._current_batch_done = done
+                if progress_callback:
+                    progress_callback(embedded + done, total, elapsed)
+
+            embeddings = embedder.encode_with_pipeline(
+                texts, progress_callback=internal_progress
+            )
+
+            # 7. 批量写入 ChromaDB（500条/批）
+            WRITE_BATCH = 500
+            for i in range(0, len(remaining_chunks), WRITE_BATCH):
+                batch_chunks = remaining_chunks[i:i + WRITE_BATCH]
+                batch_embeddings = embeddings[i:i + WRITE_BATCH]
+
+                ids = [str(c["chunk_id"]) for c in batch_chunks]
+                metadatas = [
+                    {
+                        "chunk_id": c["chunk_id"],
+                        "chapter_index": c["chapter_index"],
+                        "chapter_title": c["chapter_title"],
+                        "strategy": self.strategy,
+                        "chars": c["chars"],
+                    }
+                    for c in batch_chunks
+                ]
+
+                self.collection.add(
+                    ids=ids,
+                    embeddings=batch_embeddings.tolist(),
+                    metadatas=metadatas,
+                )
+
+            # 8. 完成
+            with self._lock:
+                self._status = "done"
+                self._current_batch_done = len(texts)
+
+        except Exception as e:
+            with self._lock:
+                self._status = "error"
+                self._error_msg = str(e)
+            raise
