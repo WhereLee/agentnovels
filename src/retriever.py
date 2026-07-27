@@ -2,12 +2,12 @@
 混合检索模块：向量检索 + BM25 + RRF 融合 + Rerank 精排
 
 架构：
-- 向量路：Embedder(ONNX+INT8) 编码查询 → ChromaDB collection.query() → top-16
-- BM25路：jieba 分词 → rank_bm25 打分 → top-16
+- 向量路：Embedder(ONNX+INT8) 编码查询 → ChromaDB collection.query()
+- BM25路：jieba 分词 → rank_bm25 打分
 - RRF 融合：两路结果按 Reciprocal Rank Fusion 合并
-- Rerank：bge-reranker-v2-m3 精排 → top-8
+- Rerank：bge-reranker-v2-m3 ONNX INT8 精排
 
-每本小说 + 每种策略独立一个 HybridRetriever 实例。
+每本小说独立一个 HybridRetriever 实例（sentence 策略）。
 """
 import time
 import threading
@@ -47,14 +47,14 @@ class HybridRetriever:
     """
     混合检索器：向量 + BM25 + RRF + Rerank
     
-    每本小说 + 每种策略（fixed/sentence）独立实例。
+    每本小说独立实例（sentence 策略）。
     BM25 索引在初始化时一次性构建，缓存在内存。
     Reranker 懒加载（首次查询时加载）。
     """
 
-    def __init__(self, novel_name: str, strategy: str = "fixed"):
+    def __init__(self, novel_name: str):
         self.novel_name = novel_name
-        self.strategy = strategy
+        self.strategy = "sentence"
         self.novel_dir = NOVELS_RAW_DIR / novel_name
 
         # === 1. 加载自定义词典 ===
@@ -62,15 +62,15 @@ class HybridRetriever:
 
         # === 2. 加载 chunks 数据（BM25 用） ===
         db_path = get_db_path(str(self.novel_dir))
-        self._chunks = load_chunks(db_path, strategy)
+        self._chunks = load_chunks(db_path, "sentence")
         if not self._chunks:
-            raise ValueError(f"《{novel_name}》策略 {strategy} 无切块数据")
+            raise ValueError(f"《{novel_name}》无切块数据，请先上传并处理小说")
 
         # chunk_id → chunk 的映射（快速查找）
         self._chunk_map = {c["chunk_id"]: c for c in self._chunks}
 
         # === 3. 构建 BM25 索引 ===
-        logger.info(f"构建 BM25 索引: {novel_name}/{strategy}, {len(self._chunks)} 块...")
+        logger.info(f"构建 BM25 索引: {novel_name}, {len(self._chunks)} 块...")
         t0 = time.perf_counter()
         self._tokenized_corpus = [
             jieba.lcut(c["content"]) for c in self._chunks
@@ -86,13 +86,13 @@ class HybridRetriever:
 
         self._chroma_client = chromadb.PersistentClient(path=chroma_path)
         try:
-            self._collection = self._chroma_client.get_collection(strategy)
+            self._collection = self._chroma_client.get_collection("sentence")
         except Exception:
-            raise ValueError(f"《{novel_name}》策略 {strategy} 尚未向量化")
+            raise ValueError(f"《{novel_name}》尚未向量化，请先执行向量化")
 
         vector_count = self._collection.count()
         if vector_count == 0:
-            raise ValueError(f"《{novel_name}》策略 {strategy} 向量库为空")
+            raise ValueError(f"《{novel_name}》向量库为空，请先执行向量化")
 
         logger.info(f"ChromaDB 加载: {vector_count} 向量")
 
@@ -104,9 +104,9 @@ class HybridRetriever:
         self._reranker_lock = threading.Lock()
 
     def _get_embedder(self) -> Embedder:
-        """懒加载 Embedder"""
+        """懒加载 Embedder (ONNX INT8)"""
         if self._embedder is None:
-            self._embedder = Embedder(mode="onnx_int8", batch_size=1)
+            self._embedder = Embedder(batch_size=1)
         return self._embedder
 
     def _get_reranker(self):
@@ -334,9 +334,20 @@ class HybridRetriever:
         )
 
         # 7. 检索日志
-        self._log_retrieval(query, results, elapsed, len(queries))
+        self._log_retrieval(query, results, elapsed, len(queries), queries)
 
-        return results
+        # 8. 检索元数据（供前端展示）
+        meta = {
+            "query_versions": queries,
+            "top_score": round(results[0]["score"], 4) if results else 0,
+            "avg_score": round(sum(r["score"] for r in results) / max(len(results), 1), 4),
+            "result_count": len(results),
+            "low_confidence": low_confidence,
+            "elapsed": round(elapsed, 2),
+            "pipeline": f"向量{len(vector_hits)} + BM25{len(bm25_hits)} → RRF{len(fused)} → Rerank{len(results)}",
+        }
+
+        return results, meta
 
     def _dedup_hits(self, hits: List[Dict]) -> List[Dict]:
         """去重：同一 chunk_id 只保留最高分、最高排名"""
@@ -351,23 +362,26 @@ class HybridRetriever:
             hit["rank"] = i
         return sorted_hits
 
-    def _log_retrieval(self, query: str, results: List[Dict], elapsed: float, query_versions: int):
+    def _log_retrieval(self, query: str, results: List[Dict], elapsed: float, query_versions: int, queries: List[str]):
         """检索日志：写入 JSONL 文件，用于质量监控"""
         try:
             log_entry = {
                 "time": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "novel": self.novel_name,
-                "strategy": self.strategy,
                 "query": query[:80],
-                "query_versions": query_versions,
+                "query_versions": queries,
                 "top_score": round(results[0]["score"], 4) if results else 0,
                 "avg_score": round(sum(r["score"] for r in results) / max(len(results), 1), 4),
                 "result_count": len(results),
                 "low_confidence": results[0].get("low_confidence", False) if results else False,
                 "elapsed": round(elapsed, 2),
+                "top_chunks": [
+                    {"chunk_id": r["chunk_id"], "score": round(r["score"], 4), "chapter": r["chapter_title"]}
+                    for r in results[:3]
+                ],
             }
             RETRIEVAL_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
             with open(RETRIEVAL_LOG_PATH, "a", encoding="utf-8") as f:
                 f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-        except Exception:
-            pass  # 日志失败不影响主流程
+        except Exception as e:
+            logger.debug(f"检索日志写入失败: {e}")

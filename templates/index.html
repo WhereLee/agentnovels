@@ -457,21 +457,9 @@
                     <div class="chapter-list">${chapterListHtml}</div>
                     <div class="vec-section">
                         <div class="vec-title">向量化</div>
-                        <div class="vec-strategy-tabs">
-                            <button class="vec-tab active" onclick="switchVecTab(this, '${novel.name}', 'fixed')">fixed</button>
-                            <button class="vec-tab" onclick="switchVecTab(this, '${novel.name}', 'sentence')">sentence</button>
-                        </div>
                         <div class="vec-row">
-                            <label>推理模式</label>
-                            <select class="vec-select" id="vec-mode-${novel.name}">
-                                <option value="pytorch">PyTorch</option>
-                                <option value="onnx">ONNX</option>
-                                <option value="onnx_int8">ONNX+INT8</option>
-                            </select>
                             <label>batch_size</label>
                             <input class="vec-input" type="number" id="vec-bs-${novel.name}" value="48" min="8" max="256">
-                        </div>
-                        <div class="vec-row">
                             <label>处理量</label>
                             <select class="vec-select" id="vec-count-${novel.name}">
                                 <option value="50">前 50 块</option>
@@ -521,15 +509,7 @@
         }
 
         // === 向量化控制 ===
-        const vecStrategies = {};  // {novelName: 'fixed'|'sentence'}
         const vecPollers = {};     // {novelName: intervalId}
-
-        function switchVecTab(btn, novelName, strategy) {
-            btn.parentElement.querySelectorAll('.vec-tab').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            vecStrategies[novelName] = strategy;
-            pollVecProgress(novelName);  // 切换后立即刷新进度
-        }
 
         // count 选择器联动
         document.addEventListener('change', (e) => {
@@ -541,8 +521,6 @@
         });
 
         async function startVec(novelName) {
-            const strategy = vecStrategies[novelName] || 'fixed';
-            const mode = document.getElementById(`vec-mode-${novelName}`).value;
             const batchSize = parseInt(document.getElementById(`vec-bs-${novelName}`).value) || 48;
             const countSel = document.getElementById(`vec-count-${novelName}`).value;
             const count = countSel === 'custom'
@@ -557,7 +535,7 @@
                 const resp = await fetch(`/api/novels/${encodeURIComponent(novelName)}/vectorize`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ strategy, mode, batch_size: batchSize, count }),
+                    body: JSON.stringify({ batch_size: batchSize, count }),
                 });
                 const data = await resp.json();
                 if (!resp.ok) throw new Error(data.detail || '启动失败');
@@ -578,9 +556,8 @@
         }
 
         async function pollVecProgress(novelName) {
-            const strategy = vecStrategies[novelName] || 'fixed';
             try {
-                const resp = await fetch(`/api/novels/${encodeURIComponent(novelName)}/vectorize/progress?strategy=${strategy}`);
+                const resp = await fetch(`/api/novels/${encodeURIComponent(novelName)}/vectorize/progress`);
                 const p = await resp.json();
                 const progEl = document.getElementById(`vec-progress-${novelName}`);
                 const barEl = document.getElementById(`vec-bar-${novelName}`);

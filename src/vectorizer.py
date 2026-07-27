@@ -22,15 +22,15 @@ from embedder import Embedder
 
 class Vectorizer:
     """
-    单本小说 + 单种策略的向量化管理器。
+    单本小说的向量化管理器（sentence 策略 + ONNX INT8）。
     
     ChromaDB 存储路径: novels/{小说名}/chroma/
-    Collection 名: strategy（"fixed" 或 "sentence"）
+    Collection 名: "sentence"
     """
 
-    def __init__(self, novel_name: str, strategy: str = "fixed"):
+    def __init__(self, novel_name: str):
         self.novel_name = novel_name
-        self.strategy = strategy
+        self.strategy = "sentence"
         self.novel_dir = NOVELS_RAW_DIR / novel_name
 
         # ChromaDB 初始化
@@ -82,16 +82,14 @@ class Vectorizer:
     def run(
         self,
         count: int = -1,
-        mode: str = "pytorch",
         batch_size: int = 48,
         progress_callback: Optional[Callable] = None,
     ):
         """
-        执行向量化。
+        执行向量化（ONNX INT8）。
         
         参数:
             count: 处理多少块（-1 = 全部剩余）
-            mode: 推理模式 (pytorch/onnx/onnx_int8)
             batch_size: 推理批次大小
             progress_callback: 外部进度回调
         """
@@ -126,8 +124,8 @@ class Vectorizer:
                 self._total = total
                 self._embedded = embedded
 
-            # 4. 加载 Embedder
-            embedder = Embedder(mode=mode, batch_size=batch_size)
+            # 4. 加载 Embedder (ONNX INT8)
+            embedder = Embedder(batch_size=batch_size)
 
             # 5. 提取文本
             texts = [c["content"] for c in remaining_chunks]

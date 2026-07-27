@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from encoding_detector import read_file_auto_encoding, detect_encoding
 from chapter_detector import detect_chapters
-from chunker import chunk_chapters, chunk_chapters_sentence, DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP
+from chunker import chunk_chapters_sentence
 from database import get_db_path, init_db, save_chapters, save_chunks as db_save_chunks, get_chunk_count
 from text_cleaner import clean_text
 
@@ -119,13 +119,8 @@ async def upload_novel(file: UploadFile = File(...)):
         init_db(db_path)
         save_chapters(db_path, detection_result.chapters)
 
-        # === 6. 切块（两种策略并行） ===
-        import asyncio
-        chunks_fixed, chunks_sentence = await asyncio.gather(
-            asyncio.to_thread(chunk_chapters, detection_result.chapters),
-            asyncio.to_thread(chunk_chapters_sentence, detection_result.chapters),
-        )
-        db_save_chunks(db_path, chunks_fixed, strategy="fixed")
+        # === 6. 切块（sentence 策略） ===
+        chunks_sentence = await asyncio.to_thread(chunk_chapters_sentence, detection_result.chapters)
         db_save_chunks(db_path, chunks_sentence, strategy="sentence")
 
         # === 6.5 索引一致性：切块更新后清空旧向量库 ===
@@ -134,9 +129,7 @@ async def upload_novel(file: UploadFile = File(...)):
             shutil.rmtree(chroma_dir)
             # 同时清除检索器缓存
             with _retriever_lock:
-                keys_to_remove = [k for k in _retrievers if k.startswith(novel_name)]
-                for k in keys_to_remove:
-                    del _retrievers[k]
+                _retrievers.pop(novel_name, None)
 
         # === 7. 生成 meta.json ===
         meta = {
@@ -148,13 +141,8 @@ async def upload_novel(file: UploadFile = File(...)):
             "chapter_detected": detection_result.detected,
             "chapter_pattern": detection_result.pattern_name,
             "chapter_count": len(detection_result.chapters),
-            "chunk_count": len(chunks_fixed),
-            "chunk_count_sentence": len(chunks_sentence),
-            "chunk_strategy": "fixed + sentence",
-            "chunk_params": {
-                "size": DEFAULT_CHUNK_SIZE,
-                "overlap": DEFAULT_OVERLAP,
-            },
+            "chunk_count": len(chunks_sentence),
+            "chunk_strategy": "sentence",
             "chapters": [
                 {
                     "index": ch["index"],
@@ -274,42 +262,32 @@ async def get_chunks(novel_name: str, strategy: str = "fixed", chapter: int = -1
 # ============================================================
 
 # 向量化任务管理器（全局）
-_vectorizers: Dict[str, object] = {}  # key: "novel_name:strategy"
+_vectorizers: Dict[str, object] = {}  # key: novel_name
 _vectorize_lock = threading.Lock()
 
 
-def _get_vectorizer(novel_name: str, strategy: str):
+def _get_vectorizer(novel_name: str):
     """获取或创建 Vectorizer 实例"""
-    key = f"{novel_name}:{strategy}"
     with _vectorize_lock:
-        if key not in _vectorizers:
+        if novel_name not in _vectorizers:
             from vectorizer import Vectorizer
-            _vectorizers[key] = Vectorizer(novel_name, strategy)
-        return _vectorizers[key]
+            _vectorizers[novel_name] = Vectorizer(novel_name)
+        return _vectorizers[novel_name]
 
 
 @app.post("/api/novels/{novel_name}/vectorize")
 async def start_vectorize(novel_name: str, request: dict):
     """
-    启动向量化任务。
+    启动向量化任务（sentence + ONNX INT8）。
     
     参数:
-        strategy: "fixed" | "sentence"
-        mode: "pytorch" | "onnx" | "onnx_int8"
         batch_size: int (default 48)
         count: int (-1=全部剩余, 正整数=指定数量)
     """
-    strategy = request.get("strategy", "fixed")
-    mode = request.get("mode", "pytorch")
     batch_size = request.get("batch_size", 48)
     count = request.get("count", -1)
 
-    if strategy not in ("fixed", "sentence"):
-        raise HTTPException(status_code=400, detail="strategy 必须是 fixed 或 sentence")
-    if mode not in ("pytorch", "onnx", "onnx_int8"):
-        raise HTTPException(status_code=400, detail="mode 必须是 pytorch/onnx/onnx_int8")
-
-    vectorizer = _get_vectorizer(novel_name, strategy)
+    vectorizer = _get_vectorizer(novel_name)
 
     # 检查是否已在运行
     progress = vectorizer.get_progress()
@@ -319,20 +297,20 @@ async def start_vectorize(novel_name: str, request: dict):
     # 后台执行
     def run_task():
         try:
-            vectorizer.run(count=count, mode=mode, batch_size=batch_size)
+            vectorizer.run(count=count, batch_size=batch_size)
         except Exception as e:
             pass  # 错误已记录在 vectorizer 内部
 
     thread = threading.Thread(target=run_task, daemon=True)
     thread.start()
 
-    return {"success": True, "message": f"向量化已启动 ({strategy}/{mode}/bs={batch_size}/count={count})"}
+    return {"success": True, "message": f"向量化已启动 (sentence/onnx_int8/bs={batch_size}/count={count})"}
 
 
 @app.get("/api/novels/{novel_name}/vectorize/progress")
-async def get_vectorize_progress(novel_name: str, strategy: str = "fixed"):
+async def get_vectorize_progress(novel_name: str):
     """查询向量化进度"""
-    vectorizer = _get_vectorizer(novel_name, strategy)
+    vectorizer = _get_vectorizer(novel_name)
     return vectorizer.get_progress()
 
 
@@ -341,21 +319,20 @@ async def get_vectorize_progress(novel_name: str, strategy: str = "fixed"):
 # ============================================================
 
 # 检索器缓存（全局）
-_retrievers: Dict[str, object] = {}  # key: "novel_name:strategy"
+_retrievers: Dict[str, object] = {}  # key: novel_name
 _retriever_lock = threading.Lock()
 
-# 对话历史（内存，按 novel:strategy 隔离）
-_chat_histories: Dict[str, List[Dict]] = {}  # key: "novel_name:strategy"
+# 对话历史（内存，按 novel 隔离）
+_chat_histories: Dict[str, List[Dict]] = {}  # key: novel_name
 
 
-def _get_retriever(novel_name: str, strategy: str):
+def _get_retriever(novel_name: str):
     """获取或创建 HybridRetriever 实例"""
-    key = f"{novel_name}:{strategy}"
     with _retriever_lock:
-        if key not in _retrievers:
+        if novel_name not in _retrievers:
             from retriever import HybridRetriever
-            _retrievers[key] = HybridRetriever(novel_name, strategy)
-        return _retrievers[key]
+            _retrievers[novel_name] = HybridRetriever(novel_name)
+        return _retrievers[novel_name]
 
 
 @app.get("/chat", response_class=HTMLResponse)
@@ -372,32 +349,28 @@ async def chat(novel_name: str, request: Request):
     """
     发送消息，SSE 流式返回。
     
-    POST body: {"message": "...", "strategy": "fixed"|"sentence"}
+    POST body: {"message": "..."}
     """
     body = await request.json()
     message = body.get("message", "").strip()
-    strategy = body.get("strategy", "fixed")
 
     if not message:
         raise HTTPException(status_code=400, detail="消息不能为空")
-    if strategy not in ("fixed", "sentence"):
-        raise HTTPException(status_code=400, detail="strategy 必须是 fixed 或 sentence")
 
     # 获取检索器
     try:
-        retriever = _get_retriever(novel_name, strategy)
+        retriever = _get_retriever(novel_name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     # 获取对话历史
-    history_key = f"{novel_name}:{strategy}"
-    if history_key not in _chat_histories:
-        _chat_histories[history_key] = []
-    history = _chat_histories[history_key]
+    if novel_name not in _chat_histories:
+        _chat_histories[novel_name] = []
+    history = _chat_histories[novel_name]
 
     # 检索
     try:
-        contexts = await asyncio.to_thread(retriever.search, message)
+        contexts, search_meta = await asyncio.to_thread(retriever.search, message)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"检索失败: {e}")
 
@@ -410,6 +383,8 @@ async def chat(novel_name: str, request: Request):
 
     def sse_stream():
         full_response = []
+        # 先发送检索元数据
+        yield f"data: {json.dumps({'type': 'meta', 'data': search_meta}, ensure_ascii=False)}\n\n"
         try:
             for token in generate_answer(message, contexts, history):
                 if token.startswith("\n__SOURCES__"):
@@ -428,7 +403,7 @@ async def chat(novel_name: str, request: Request):
         history.append({"role": "assistant", "content": answer})
         # 保留最近 20 轮
         if len(history) > 40:
-            _chat_histories[history_key] = history[-40:]
+            _chat_histories[novel_name] = history[-40:]
 
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
@@ -444,20 +419,16 @@ async def chat(novel_name: str, request: Request):
 
 
 @app.get("/api/novels/{novel_name}/chat/history")
-async def get_chat_history(novel_name: str, strategy: str = "fixed"):
+async def get_chat_history(novel_name: str):
     """获取对话历史"""
-    history_key = f"{novel_name}:{strategy}"
-    history = _chat_histories.get(history_key, [])
+    history = _chat_histories.get(novel_name, [])
     return {"history": history}
 
 
 @app.post("/api/novels/{novel_name}/chat/reset")
 async def reset_chat(novel_name: str, request: Request):
     """重置对话"""
-    body = await request.json()
-    strategy = body.get("strategy", "fixed")
-    history_key = f"{novel_name}:{strategy}"
-    _chat_histories[history_key] = []
+    _chat_histories[novel_name] = []
     return {"success": True, "message": "对话已重置"}
 
 
@@ -489,8 +460,8 @@ async def warmup_retrievers():
             chroma_dir = novel_dir / "chroma"
             if novel_dir.is_dir() and chroma_dir.exists():
                 try:
-                    _get_retriever(novel_dir.name, "fixed")
-                    print(f"  预热完成: {novel_dir.name}/fixed")
+                    _get_retriever(novel_dir.name)
+                    print(f"  预热完成: {novel_dir.name}")
                 except Exception as e:
                     print(f"  预热失败 ({novel_dir.name}): {e}")
                 break  # 只预热第一本
