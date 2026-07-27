@@ -16,16 +16,10 @@ from openai import OpenAI
 
 from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, logger
 
-# 改写用的轻量 prompt（极短输出，低 temperature）
-REWRITE_PROMPT = """你是一个小说检索助手。将读者的问题改写为2个适合在小说原文中搜索的版本。
+# 改写用的轻量 prompt
+REWRITE_PROMPT = """请把下面的问题换两种问法，用于在小说原文中搜索相关段落。每种问法一行输出，不要编号，不要解释。
 
-要求：
-- 把问题中的描述性语言展开为原文可能出现的词汇（动作、场景、情绪、对话片段）
-- 不要猜测答案，不要插入你认为的角色名
-- 如果问题已包含明确角色名，围绕该角色补充场景/情绪/动作关键词
-- 每个版本一行，不要编号，不要解释
-
-读者问题：{query}"""
+问题：{query}"""
 
 
 def rewrite_query(query: str) -> List[str]:
