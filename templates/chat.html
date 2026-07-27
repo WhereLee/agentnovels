@@ -317,10 +317,6 @@
         function renderMeta(msgEl, bubble, meta) {
             const box = document.createElement('div');
             box.className = 'meta-box';
-            const rewrites = meta.query_versions || [];
-            const rewriteText = rewrites.length > 1
-                ? rewrites.slice(1).map(r => `“${r}”`).join(' / ')
-                : '无';
             box.innerHTML = `
                 <div class="meta-row">
                     <span><span class="meta-label">top_score</span> ${meta.top_score}</span>
@@ -332,7 +328,6 @@
                     <span><span class="meta-label">管线</span> ${meta.pipeline}</span>
                     ${meta.low_confidence ? '<span style="color:#f85149">⚠ 低置信度</span>' : ''}
                 </div>
-                <div class="meta-rewrite"><span class="meta-label">改写</span> ${rewriteText}</div>
             `;
             msgEl.insertBefore(box, bubble);
             scrollToBottom();

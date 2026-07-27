@@ -26,7 +26,6 @@ from config import (
 from database import get_db_path, load_chunks
 from embedder import Embedder
 from dict_builder import load_dict
-from query_rewriter import rewrite_query
 
 
 # RRF 常数
@@ -266,40 +265,30 @@ class HybridRetriever:
 
     def search(self, query: str, top_k: int = TOP_K) -> List[Dict]:
         """
-        完整检索管线：查询改写 → 多路向量+BM25 → RRF → 实体加分 → Rerank → 阈值判定 → top_k
+        检索管线：向量+BM25 → RRF → 实体加分 → Rerank → 阈值判定 → top_k
         
-        返回: [{chunk_id, content, chapter_title, chapter_index, score, source_strategy, low_confidence}]
+        返回: [{chunk_id, content, chapter_title, chapter_index, score, low_confidence}], meta
         """
         t0 = time.perf_counter()
 
-        # 1. 查询改写（语义鸿沟缓解）
-        queries = rewrite_query(query)
+        # 1. 双路检索
+        vector_hits = self._vector_search(query, top_n=VECTOR_TOP_K)
+        bm25_hits = self._bm25_search(query, top_n=BM25_TOP_K)
 
-        # 2. 多查询并行检索
-        all_vector_hits = []
-        all_bm25_hits = []
-        for q in queries:
-            all_vector_hits.extend(self._vector_search(q, top_n=VECTOR_TOP_K))
-            all_bm25_hits.extend(self._bm25_search(q, top_n=BM25_TOP_K))
-
-        # 去重（同一 chunk_id 只保留最高分）
-        vector_hits = self._dedup_hits(all_vector_hits)
-        bm25_hits = self._dedup_hits(all_bm25_hits)
-
-        # 3. RRF 融合
+        # 2. RRF 融合
         fused = self._rrf_fusion(vector_hits, bm25_hits)
 
-        # 4. 实体加分
+        # 3. 实体加分
         fused = self._entity_boost(query, fused)
         # 将 entity_boost 加入 rrf_score
         for item in fused:
             item["rrf_score"] = item.get("rrf_score", 0) + item.get("entity_boost", 0)
         fused.sort(key=lambda x: x["rrf_score"], reverse=True)
 
-        # 5. Rerank 精排（带并发控制）
+        # 4. Rerank 精排（带并发控制）
         reranked = self._rerank(query, fused, top_k=top_k)
 
-        # 6. 组装结果 + 低置信度判定
+        # 5. 组装结果 + 低置信度判定
         results = []
         low_confidence = False
         if reranked:
@@ -329,16 +318,15 @@ class HybridRetriever:
         elapsed = time.perf_counter() - t0
         logger.info(
             f"检索完成: '{query[:20]}...' → {len(results)} 结果, "
-            f"耗时 {elapsed:.2f}s (查询{len(queries)}版本, "
-            f"向量{len(vector_hits)} + BM25{len(bm25_hits)} → RRF{len(fused)} → Rerank{len(results)})"
+            f"耗时 {elapsed:.2f}s "
+            f"(向量{len(vector_hits)} + BM25{len(bm25_hits)} → RRF{len(fused)} → Rerank{len(results)})"
         )
 
-        # 7. 检索日志
-        self._log_retrieval(query, results, elapsed, len(queries), queries)
+        # 6. 检索日志
+        self._log_retrieval(query, results, elapsed)
 
-        # 8. 检索元数据（供前端展示）
+        # 7. 检索元数据（供前端展示）
         meta = {
-            "query_versions": queries,
             "top_score": round(results[0]["score"], 4) if results else 0,
             "avg_score": round(sum(r["score"] for r in results) / max(len(results), 1), 4),
             "result_count": len(results),
@@ -362,14 +350,13 @@ class HybridRetriever:
             hit["rank"] = i
         return sorted_hits
 
-    def _log_retrieval(self, query: str, results: List[Dict], elapsed: float, query_versions: int, queries: List[str]):
+    def _log_retrieval(self, query: str, results: List[Dict], elapsed: float):
         """检索日志：写入 JSONL 文件，用于质量监控"""
         try:
             log_entry = {
                 "time": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "novel": self.novel_name,
                 "query": query[:80],
-                "query_versions": queries,
                 "top_score": round(results[0]["score"], 4) if results else 0,
                 "avg_score": round(sum(r["score"] for r in results) / max(len(results), 1), 4),
                 "result_count": len(results),
