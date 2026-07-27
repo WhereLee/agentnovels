@@ -228,6 +228,7 @@
         const novelName = params.get('novel') || '';
         let strategy = 'fixed';
         let isStreaming = false;
+        let isFirstQuery = true;
 
         document.getElementById('novelName').textContent = novelName ? `《${novelName}》` : '';
 
@@ -263,9 +264,12 @@
             // 创建 AI 消息占位
             const aiMsg = appendMessage('ai', '');
             const bubble = aiMsg.querySelector('.bubble');
-            bubble.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
+            bubble.innerHTML = isFirstQuery
+                ? '正在初始化检索引擎（首次约5秒）<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>'
+                : '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
 
             isStreaming = true;
+            isFirstQuery = false;
             document.getElementById('sendBtn').disabled = true;
 
             try {

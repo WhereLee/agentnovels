@@ -28,15 +28,23 @@ SYSTEM_PROMPT = """你是一个对小说有深度理解的对话者。你读过�
 - 不列点、不加粗、不写"首先/其次/最后"。像一个人坐你对面慢慢聊。
 - 充分展开你的分析。把片段中的细节、潜台词、关联都聊透，不必克制篇幅。宁可多说一层，不要点到为止。
 
-底线：不编造原文中不存在的情节。可以深度解读，但不能捏造事实。"""
+底线：不编造原文中不存在的情节。可以深度解读，但不能捏造事实。
+
+重要规则：
+- 如果你的回答中引用了某个事实，必须能在上述片段中找到依据。
+- 如果片段中没有足够信息回答问题，直接说“这些片段里没有涉及这个内容”，不要推测。
+- 不要基于片段之外的知识回答。"""
 
 
 def build_context(retrieved_chunks: List[Dict]) -> str:
-    """将检索到的 chunks 组装为上下文字符串（带来源标注）"""
+    """将检索到的 chunks 组装为上下文字符串（按故事时间序排列 + 来源标注）"""
+    # 按 chapter_index 排序（而非 score），让 LLM 按时间线阅读
+    sorted_chunks = sorted(retrieved_chunks, key=lambda c: c.get("chapter_index", 0))
+
     context_parts = []
-    for i, chunk in enumerate(retrieved_chunks, 1):
+    for i, chunk in enumerate(sorted_chunks, 1):
         context_parts.append(
-            f"【片段{i}｜{chunk['chapter_title']}｜chunk_{chunk['chunk_id']}】\n{chunk['content']}"
+            f"【片段{i}｜第{chunk.get('chapter_index', 0)+1}章·{chunk['chapter_title']}｜chunk_{chunk['chunk_id']}】\n{chunk['content']}"
         )
     return "\n\n---\n\n".join(context_parts)
 
@@ -67,15 +75,20 @@ def generate_answer(
             messages.append({"role": msg["role"], "content": msg["content"]})
 
     # 当前问题（带检索片段）
-    user_message = f"""以下是从小说中检索到的相关片段：
+    # 低置信度提示
+    low_conf_notice = ""
+    if contexts and contexts[0].get("low_confidence", False):
+        low_conf_notice = "\n注意：以下片段与问题的相关度较低，回答仅供参考。\n"
 
+    user_message = f"""以下是从小说中检索到的相关片段（按故事时间顺序排列）：
+{low_conf_notice}
 {context}
 
 ---
 
 读者问题：{query}
 
-请基于上述片段回答。"""
+请基于上述片段回答。如果片段中没有相关信息，请如实说明。"""
 
     messages.append({"role": "user", "content": user_message})
 

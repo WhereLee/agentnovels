@@ -143,29 +143,56 @@ class Vectorizer:
                 texts, progress_callback=internal_progress
             )
 
-            # 7. 批量写入 ChromaDB（500条/批）
+            # 7. 批量写入 ChromaDB（500条/批，带写前校验 + 写后验证）
             WRITE_BATCH = 500
             for i in range(0, len(remaining_chunks), WRITE_BATCH):
                 batch_chunks = remaining_chunks[i:i + WRITE_BATCH]
                 batch_embeddings = embeddings[i:i + WRITE_BATCH]
 
-                ids = [str(c["chunk_id"]) for c in batch_chunks]
-                metadatas = [
-                    {
-                        "chunk_id": c["chunk_id"],
-                        "chapter_index": c["chapter_index"],
-                        "chapter_title": c["chapter_title"],
+                # === 写前校验 ===
+                ids = []
+                metadatas = []
+                valid_embeddings = []
+                for j, (chunk, emb) in enumerate(zip(batch_chunks, batch_embeddings)):
+                    # 维度校验
+                    if len(emb) != 768:
+                        raise RuntimeError(
+                            f"chunk_{chunk['chunk_id']} embedding 维度异常: "
+                            f"期望 768, 实际 {len(emb)}"
+                        )
+                    # 内容校验
+                    if not chunk["content"].strip():
+                        raise RuntimeError(
+                            f"chunk_{chunk['chunk_id']} 内容为空，拒绝写入"
+                        )
+                    # metadata 不含 None（ChromaDB 不接受）
+                    meta = {
+                        "chunk_id": chunk["chunk_id"],
+                        "chapter_index": chunk["chapter_index"],
+                        "chapter_title": chunk["chapter_title"] or "",
                         "strategy": self.strategy,
-                        "chars": c["chars"],
+                        "chars": chunk["chars"],
                     }
-                    for c in batch_chunks
-                ]
+                    ids.append(str(chunk["chunk_id"]))
+                    metadatas.append(meta)
+                    valid_embeddings.append(emb)
 
+                # === 写入 ===
                 self.collection.add(
                     ids=ids,
-                    embeddings=batch_embeddings.tolist(),
+                    embeddings=[e.tolist() if hasattr(e, 'tolist') else e for e in valid_embeddings],
                     metadatas=metadatas,
                 )
+
+                # === 写后验证 ===
+                expected_count = embedded + i + len(batch_chunks)
+                actual_count = self.collection.count()
+                if actual_count != expected_count:
+                    raise RuntimeError(
+                        f"ChromaDB 写入校验失败: "
+                        f"期望 {expected_count} 条, 实际 {actual_count} 条. "
+                        f"可能发生了部分写入，建议清空 collection 重建."
+                    )
 
             # 8. 完成
             with self._lock:

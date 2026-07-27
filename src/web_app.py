@@ -128,6 +128,16 @@ async def upload_novel(file: UploadFile = File(...)):
         db_save_chunks(db_path, chunks_fixed, strategy="fixed")
         db_save_chunks(db_path, chunks_sentence, strategy="sentence")
 
+        # === 6.5 索引一致性：切块更新后清空旧向量库 ===
+        chroma_dir = novel_dir / "chroma"
+        if chroma_dir.exists():
+            shutil.rmtree(chroma_dir)
+            # 同时清除检索器缓存
+            with _retriever_lock:
+                keys_to_remove = [k for k in _retrievers if k.startswith(novel_name)]
+                for k in keys_to_remove:
+                    del _retrievers[k]
+
         # === 7. 生成 meta.json ===
         meta = {
             "name": novel_name,
@@ -392,7 +402,8 @@ async def chat(novel_name: str, request: Request):
         raise HTTPException(status_code=500, detail=f"检索失败: {e}")
 
     if not contexts:
-        raise HTTPException(status_code=404, detail="未检索到相关内容，请确认向量化已完成")
+        # 不报 404，让 LLM 基于空上下文如实告知用户
+        pass
 
     # 流式生成
     from agent import generate_answer
@@ -462,6 +473,29 @@ def _sanitize_filename(name: str) -> str:
     # 移除控制字符
     name = re.sub(r'[\x00-\x1f]', '', name)
     return name.strip() or "untitled"
+
+
+# ============================================================
+# 启动预热
+# ============================================================
+
+@app.on_event("startup")
+async def warmup_retrievers():
+    """服务启动后后台预加载第一本已向量化小说的 Retriever，消除首次查询冷启动延迟"""
+    def _warm():
+        if not NOVELS_DIR.exists():
+            return
+        for novel_dir in sorted(NOVELS_DIR.iterdir()):
+            chroma_dir = novel_dir / "chroma"
+            if novel_dir.is_dir() and chroma_dir.exists():
+                try:
+                    _get_retriever(novel_dir.name, "fixed")
+                    print(f"  预热完成: {novel_dir.name}/fixed")
+                except Exception as e:
+                    print(f"  预热失败 ({novel_dir.name}): {e}")
+                break  # 只预热第一本
+
+    threading.Thread(target=_warm, daemon=True).start()
 
 
 # ============================================================
