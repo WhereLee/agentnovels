@@ -19,7 +19,7 @@ from typing import List, Dict, Optional
 from rank_bm25 import BM25Okapi
 
 from config import (
-    NOVELS_RAW_DIR, RERANKER_PATH, logger,
+    NOVELS_RAW_DIR, RERANKER_PATH, PROJECT_ROOT, logger,
     TOP_K, VECTOR_TOP_K, BM25_TOP_K,
 )
 from database import get_db_path, load_chunks
@@ -29,6 +29,9 @@ from dict_builder import load_dict
 
 # RRF 常数
 RRF_K = 60
+
+# Reranker ONNX INT8 模型路径
+RERANKER_ONNX_INT8_PATH = PROJECT_ROOT / "models" / "bge-reranker-v2-m3-onnx-int8"
 
 
 class HybridRetriever:
@@ -98,13 +101,15 @@ class HybridRetriever:
         return self._embedder
 
     def _get_reranker(self):
-        """懒加载 Reranker"""
+        """懒加载 Reranker（ONNX Runtime INT8，无 PyTorch 依赖）"""
         if self._reranker is None:
             with self._reranker_lock:
                 if self._reranker is None:
-                    from sentence_transformers import CrossEncoder
-                    logger.info(f"加载 Reranker: {RERANKER_PATH}")
-                    self._reranker = CrossEncoder(str(RERANKER_PATH))
+                    from optimum.onnxruntime import ORTModelForSequenceClassification
+                    from transformers import AutoTokenizer
+                    logger.info(f"加载 Reranker (ONNX INT8): {RERANKER_ONNX_INT8_PATH}")
+                    self._reranker_tokenizer = AutoTokenizer.from_pretrained(str(RERANKER_ONNX_INT8_PATH))
+                    self._reranker = ORTModelForSequenceClassification.from_pretrained(str(RERANKER_ONNX_INT8_PATH))
         return self._reranker
 
     def _vector_search(self, query: str, top_n: int = VECTOR_TOP_K) -> List[Dict]:
@@ -178,7 +183,7 @@ class HybridRetriever:
 
     def _rerank(self, query: str, candidates: List[Dict], top_k: int = TOP_K) -> List[Dict]:
         """
-        Rerank 精排：用 CrossEncoder 对候选重新打分。
+        Rerank 精排：用 ONNX INT8 CrossEncoder 对候选重新打分。
         """
         if not candidates:
             return []
@@ -186,19 +191,25 @@ class HybridRetriever:
         reranker = self._get_reranker()
 
         # 构建 (query, passage) 对
-        pairs = []
+        passages = []
         valid_candidates = []
         for cand in candidates:
             chunk = self._chunk_map.get(cand["chunk_id"])
             if chunk:
-                pairs.append((query, chunk["content"]))
+                passages.append(chunk["content"])
                 valid_candidates.append(cand)
 
-        if not pairs:
+        if not passages:
             return []
 
-        # CrossEncoder 打分
-        rerank_scores = reranker.predict(pairs)
+        # ONNX 批量推理
+        inputs = self._reranker_tokenizer(
+            [query] * len(passages), passages,
+            padding=True, truncation=True, max_length=512,
+            return_tensors="np",
+        )
+        outputs = reranker(**{k: v for k, v in inputs.items()})
+        rerank_scores = outputs.logits[:, 0]  # (N,)
 
         # 合并分数并排序
         for i, cand in enumerate(valid_candidates):

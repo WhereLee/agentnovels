@@ -1,9 +1,20 @@
-"""RAG Agent 模块：组装 prompt + 调用 LLM 流式生成回答 + 来源标注"""
+"""RAG Agent 模块：组装 prompt + 调用 LLM 流式生成回答 + 来源标注
+
+容错机制：
+- 超时/异常自动重试 1 次（指数退避 3s）
+- 重试仍失败 → 降级：直接返回检索原文片段
+"""
+import time
+import json
 from typing import List, Dict, Generator
 
 from openai import OpenAI
 
 from config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_TIMEOUT, logger
+
+# 重试配置
+MAX_RETRIES = 1
+RETRY_BACKOFF = 3  # 秒
 
 SYSTEM_PROMPT = """你是一个对小说有深度理解的对话者。你读过这本书很多遍，不仅记得情节，更能读出文字背后的东西。
 
@@ -15,7 +26,7 @@ SYSTEM_PROMPT = """你是一个对小说有深度理解的对话者。你读过�
 语气：
 - 平静、自然、有分寸。不用刻意兴奋，不用网络用语，不用感叹号堆砌。
 - 不列点、不加粗、不写"首先/其次/最后"。像一个人坐你对面慢慢聊。
-- 长短随意，说到点上就停。
+- 充分展开你的分析。把片段中的细节、潜台词、关联都聊透，不必克制篇幅。宁可多说一层，不要点到为止。
 
 底线：不编造原文中不存在的情节。可以深度解读，但不能捏造事实。"""
 
@@ -70,17 +81,35 @@ def generate_answer(
 
     client = OpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL, timeout=LLM_TIMEOUT)
 
-    # 流式调用
-    try:
-        stream = client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=messages,
-            temperature=0.85,
-            stream=True,
-        )
-    except Exception as e:
-        logger.error(f"LLM API 调用失败: {e}")
-        yield f"[错误] LLM 服务不可用: {e}"
+    # 流式调用（带重试）
+    stream = None
+    last_error = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            stream = client.chat.completions.create(
+                model=LLM_MODEL,
+                messages=messages,
+                temperature=0.85,
+                max_tokens=2000,
+                stream=True,
+            )
+            break
+        except Exception as e:
+            last_error = e
+            if attempt < MAX_RETRIES:
+                logger.warning(f"LLM API 调用失败 (attempt {attempt+1}): {e}, {RETRY_BACKOFF}s 后重试...")
+                time.sleep(RETRY_BACKOFF)
+            else:
+                logger.error(f"LLM API 调用失败 (已重试{MAX_RETRIES}次): {e}")
+
+    # 重试仍失败 → 降级：返回检索原文
+    if stream is None:
+        yield "[LLM 暂不可用] 以下是检索到的原文片段，供您直接阅读：\n\n"
+        for i, c in enumerate(contexts[:5], 1):
+            yield f"【片段{i}｜{c['chapter_title']}】\n{c['content'][:200]}\n\n"
+        # 仍然输出来源信息
+        sources = _build_sources(contexts)
+        yield f"\n__SOURCES__{json.dumps(sources, ensure_ascii=False)}"
         return
 
     # 逐 token 输出
@@ -94,12 +123,21 @@ def generate_answer(
     except Exception as e:
         logger.error(f"流式读取中断: {e}")
         if not full_answer:
-            yield f"[错误] LLM 响应中断: {e}"
-            return
+            # 流式中断且无输出 → 降级
+            yield "[LLM 响应中断] 以下是检索到的原文片段：\n\n"
+            for i, c in enumerate(contexts[:5], 1):
+                yield f"【片段{i}｜{c['chapter_title']}】\n{c['content'][:200]}\n\n"
 
-    # 输出来源信息（特殊标记）
-    import json
-    sources = [
+    # 输出来源信息
+    sources = _build_sources(contexts)
+    yield f"\n__SOURCES__{json.dumps(sources, ensure_ascii=False)}"
+
+    logger.debug(f"LLM 生成完成，回答长度: {len(''.join(full_answer))} 字")
+
+
+def _build_sources(contexts: List[Dict]) -> List[Dict]:
+    """构建来源信息列表"""
+    return [
         {
             "chunk_id": c["chunk_id"],
             "chapter_title": c["chapter_title"],
@@ -109,6 +147,3 @@ def generate_answer(
         }
         for c in contexts
     ]
-    yield f"\n__SOURCES__{json.dumps(sources, ensure_ascii=False)}"
-
-    logger.debug(f"LLM 生成完成，回答长度: {len(''.join(full_answer))} 字")

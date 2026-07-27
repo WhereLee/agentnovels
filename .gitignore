@@ -44,6 +44,10 @@ test_chroma.py
 test_chroma_persist/
 test_benchmark.py
 test_chat.py
+test_recall_compare.py
+test_recall_result.txt
+test_run_output.txt
+test_err.txt
 migrate_to_db.py
 
 # 日志
